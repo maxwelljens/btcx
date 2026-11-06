@@ -53,6 +53,8 @@ internal/
   webview/               hardened WebKitGTK (6, GTK4 flavour) embedding for
                          HTML mail: JS off, no network, external links
                          (cgo; note webkit2gtk-4.1 is the GTK3 flavour)
+  pipeline/              test-only end-to-end security suite: hostile mail
+                         through parse -> sanitize -> render
   ui/                    gotk4 widgets and views (thin; no business logic)
   app/                   presenters/controllers wiring model + services + ui
   buildinfo/             version/commit build metadata (ldflags)
@@ -189,6 +191,9 @@ Mail content, server responses, and filenames are untrusted input.
 - `accounts/<name>.toml` — one file per account: display name, email address,
   IMAP host/port/user, SMTP host/port/user, auth method, TLS mode, password
   or `password_command`, signature, sent/drafts folders.
+- `remote_images.toml` — btcx-maintained list of sender domains whose remote
+  images load without asking (the reader's "Always from ..." action);
+  safe to edit by hand.
 
 All files are TOML. Unknown keys warn (forward compatibility); invalid values
 fail validation with a precise message.

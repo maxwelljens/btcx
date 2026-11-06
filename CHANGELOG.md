@@ -8,6 +8,15 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Reply to...** menu: Reply, Reply to All, and Reply to List — mailing-list
+  replies address the RFC 2369 `List-Post` posting address (Cc cleared),
+  fall back to direct replies on non-list messages, and keep threading and
+  quoting. Keyboard shortcuts unchanged (Ctrl+R, Ctrl+Shift+R).
+- **Always load images from a domain**: "Always from \<domain\>" on the
+  remote-content bar remembers a sender domain (persisted in
+  `remote_images.toml`, editable by hand) and auto-loads remote images in
+  messages from it.
+
 - Domain model for messages, headers, addresses, envelopes, mailboxes and
   refs (`internal/model`), with RFC 2047 decoding and CR/LF-safe address
   rendering.
