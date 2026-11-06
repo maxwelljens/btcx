@@ -118,10 +118,69 @@ func (w *MainWindow) buildHeader() *gtk.HeaderBar {
 
 	right := gtk.NewBox(gtk.OrientationHorizontal, 6)
 	right.Append(refresh)
+	right.Append(w.buildReplyMenu())
 	right.Append(compose)
 	bar.PackEnd(right)
 
 	return bar
+}
+
+// buildReplyMenu is the "Reply" menu button: its items depend on the shown
+// message, so they are rebuilt each time the popover opens.
+func (w *MainWindow) buildReplyMenu() *gtk.MenuButton {
+	btn := gtk.NewMenuButton()
+	btn.SetLabel("Reply")
+	btn.SetTooltipText("Reply to the selected message (Ctrl+R)")
+
+	box := gtk.NewBox(gtk.OrientationVertical, 0)
+	pop := gtk.NewPopover()
+	pop.SetChild(box)
+	btn.SetPopover(pop)
+
+	var items []*gtk.Button
+	pop.ConnectMap(func() {
+		for _, item := range items {
+			box.Remove(item)
+		}
+		items = items[:0]
+		listPost := ""
+		if w.reader != nil {
+			listPost = w.reader.view.ListPost
+		}
+		for _, a := range replyActions(listPost) {
+			item := gtk.NewButtonWithLabel(a.label)
+			item.AddCSSClass("flat")
+			if a.mode == contract.ReplyList {
+				item.SetTooltipText("Post to " + listPost)
+			}
+			item.ConnectClicked(func() {
+				pop.Popdown()
+				w.reply(a.mode)
+			})
+			box.Append(item)
+			items = append(items, item)
+		}
+	})
+	return btn
+}
+
+// replyAction is one item of the Reply menu.
+type replyAction struct {
+	label string
+	mode  contract.ReplyMode
+}
+
+// replyActions is the Reply menu for a message: the list reply only exists
+// when the message carries a List-Post address.
+func replyActions(listPost string) []replyAction {
+	actions := []replyAction{
+		{"Reply", contract.ReplyDirect},
+		{"Reply to All", contract.ReplyAll},
+	}
+	if listPost != "" {
+		actions = append(actions, replyAction{"Reply to List", contract.ReplyList})
+	}
+	return actions
 }
 
 func (w *MainWindow) buildBody() gtk.Widgetter {
@@ -480,6 +539,14 @@ func (w *MainWindow) selectedRef() (contract.MessageRow, bool) {
 	return row, ok
 }
 
+// reply opens a reply draft for the selected message; the mode picks direct,
+// all or list.
+func (w *MainWindow) reply(mode contract.ReplyMode) {
+	if row, ok := w.selectedRef(); ok {
+		w.compose(w.controller.ReplyTo(w.account, row.Ref, mode))
+	}
+}
+
 // addActions registers the named actions and their accelerators.
 func (w *MainWindow) addActions() {
 	type entry struct {
@@ -489,16 +556,8 @@ func (w *MainWindow) addActions() {
 	}
 	entries := []entry{
 		{"compose", []string{"<Control>n"}, func() { w.compose(w.controller.NewCompose(w.account)) }},
-		{"reply", []string{"<Control>r"}, func() {
-			if row, ok := w.selectedRef(); ok {
-				w.compose(w.controller.ReplyTo(w.account, row.Ref, false))
-			}
-		}},
-		{"reply-all", []string{"<Control><Shift>r"}, func() {
-			if row, ok := w.selectedRef(); ok {
-				w.compose(w.controller.ReplyTo(w.account, row.Ref, true))
-			}
-		}},
+		{"reply", []string{"<Control>r"}, func() { w.reply(contract.ReplyDirect) }},
+		{"reply-all", []string{"<Control><Shift>r"}, func() { w.reply(contract.ReplyAll) }},
 		{"forward", []string{"<Control>l"}, func() {
 			if row, ok := w.selectedRef(); ok {
 				w.compose(w.controller.Forward(w.account, row.Ref))

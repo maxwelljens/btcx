@@ -13,6 +13,7 @@ import (
 
 	xhtml "golang.org/x/net/html"
 
+	"btcx/internal/config"
 	"btcx/internal/contract"
 	"btcx/internal/model"
 	"btcx/internal/render"
@@ -138,6 +139,48 @@ func mustParseCIDR(s string) *net.IPNet {
 // RemoteImages populated and the opt-in bar hidden. Inline cid: resources are
 // resolved from the message itself. Fetches only reach public addresses
 // (see dialPublic); private and loopback targets are refused.
+// TrustImageDomain remembers a sender domain whose remote images always
+// load, persisting the change immediately (remote_images.toml, 0600).
+func (c *Controller) TrustImageDomain(domain string) error {
+	norm, err := config.NormalizeImageDomain(domain)
+	if err != nil {
+		return err
+	}
+	c.mu.Lock()
+	c.trustedImages[norm] = true
+	domains := make([]string, 0, len(c.trustedImages))
+	for d := range c.trustedImages {
+		domains = append(domains, d)
+	}
+	c.mu.Unlock()
+	if err := config.SaveTrustedImages(c.cfg.Dir, domains); err != nil {
+		return fmt.Errorf("app: trust image domain %s: %w", norm, err)
+	}
+	c.log.Debug("app: trusted image domain", "domain", norm)
+	return nil
+}
+
+// trustedImagesAllowed reports whether remote images load without asking
+// for this message: either the global policy is off, or a From sender
+// domain is on the trusted list.
+func (c *Controller) trustedImagesAllowed(msg *model.Message) bool {
+	if !c.cfg.BlockRemoteContent {
+		return true
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, from := range msg.From() {
+		at := strings.LastIndexByte(from.Addr, '@')
+		if at < 0 {
+			continue
+		}
+		if c.trustedImages[strings.ToLower(from.Addr[at+1:])] {
+			return true
+		}
+	}
+	return false
+}
+
 func (c *Controller) LoadRemoteContent(account string, ref model.Ref) {
 	st := c.state(account)
 	if st == nil {

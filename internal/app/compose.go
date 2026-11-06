@@ -18,10 +18,12 @@ func (c *Controller) NewCompose(account string) contract.ComposeDraft {
 	return contract.ComposeDraft{Account: account}
 }
 
-// ReplyTo builds a reply draft. It may fetch the original message from the
-// server when it is not cached, so it can block briefly when called from the
-// UI thread; the reader pane has normally cached it already.
-func (c *Controller) ReplyTo(account string, ref model.Ref, replyAll bool) contract.ComposeDraft {
+// ReplyTo builds a reply draft of the requested kind. It may fetch the
+// original message from the server when it is not cached, so it can block
+// briefly when called from the UI thread; the reader pane has normally
+// cached it already. ReplyList on a message without List-Post falls back
+// to a direct reply so the action never dead-ends.
+func (c *Controller) ReplyTo(account string, ref model.Ref, mode contract.ReplyMode) contract.ComposeDraft {
 	st := c.state(account)
 	if st == nil {
 		c.fail(fmt.Errorf("app: reply: unknown account %q", account))
@@ -34,10 +36,48 @@ func (c *Controller) ReplyTo(account string, ref model.Ref, replyAll bool) contr
 	}
 	d := draftFrom(account, compose.Reply(msg, identity(st.cfg), ""))
 	d.ReplyTo = ref
-	if replyAll {
+	switch mode {
+	case contract.ReplyAll:
 		d.To = replyAllRecipients(msg, st.cfg.Email)
+	case contract.ReplyList:
+		if list := ListPostAddress(msg); !list.IsZero() {
+			d.To = []model.Address{list}
+			d.Cc = nil // the list reaches everyone; extra directees spam
+		}
 	}
 	return d
+}
+
+// ListPostAddress returns the message's mailing-list posting address
+// (RFC 2369 List-Post, first mailto), or "" when the message is not from a
+// list (including NO-RESPONSE lists).
+func ListPostAddress(m *model.Message) model.Address {
+	raw := m.Header.Get("List-Post")
+	lower := strings.ToLower(raw)
+	for i := 0; ; {
+		j := strings.Index(lower[i:], "mailto:")
+		if j < 0 {
+			return model.Address{}
+		}
+		j += i
+		rest := raw[j+len("mailto:"):]
+		if end := strings.IndexAny(rest, "> \t,"); end >= 0 {
+			rest = rest[:end]
+		}
+		if q := strings.IndexByte(rest, '?'); q >= 0 {
+			rest = rest[:q]
+		}
+		i = j + len("mailto:")
+		if rest == "" {
+			continue
+		}
+		if strings.Contains(strings.ToLower(rest), "@no-response") {
+			continue
+		}
+		if addr, err := model.ParseAddressList(rest); err == nil && len(addr) > 0 && addr[0].Addr != "" {
+			return addr[0]
+		}
+	}
 }
 
 // Forward builds a forward draft carrying the original as an attachment.

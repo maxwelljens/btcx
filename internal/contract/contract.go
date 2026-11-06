@@ -89,6 +89,11 @@ type MessageView struct {
 	Attachments []AttachmentInfo
 	Unread      bool
 	Flagged     bool
+
+	// ListPost is the posting address of a mailing list (RFC 2369
+	// List-Post's mailto), or "" when the message is not from a list. The
+	// UI offers "Reply to List" only when it is set.
+	ListPost string
 }
 
 // DraftAttachment is an attachment of a message being composed.
@@ -116,6 +121,19 @@ type ComposeDraft struct {
 // EditRequestID correlates an asynchronous external-editor session with
 // its OnExternalEditDone result.
 type EditRequestID int
+
+// ReplyMode selects which reply variant to build.
+type ReplyMode int
+
+const (
+	// ReplyDirect answers the Reply-To (else the sender).
+	ReplyDirect ReplyMode = iota
+	// ReplyAll additionally addresses every original recipient (minus self).
+	ReplyAll
+	// ReplyList addresses the message's List-Post mailto; messages without
+	// one fall back to ReplyDirect.
+	ReplyList
+)
 
 // AccountSpec is the structured account input produced by the first-run
 // setup wizard. The application validates it and writes it as
@@ -209,13 +227,17 @@ type Controller interface {
 	SaveAttachment(account string, ref model.Ref, index int, destPath string) error
 
 	NewCompose(account string) ComposeDraft
-	ReplyTo(account string, ref model.Ref, replyAll bool) ComposeDraft
+	ReplyTo(account string, ref model.Ref, mode ReplyMode) ComposeDraft
 	Forward(account string, ref model.Ref) ComposeDraft
 	// Send queues the message for delivery; the result is reported via
 	// OnSendResult. before_send script hooks may veto.
 	Send(draft ComposeDraft)
 	// SaveDraft appends the draft to the account's Drafts mailbox.
 	SaveDraft(draft ComposeDraft)
+	// TrustImageDomain remembers (persistently) that remote images in
+	// messages from this sender domain are always loaded. The domain is
+	// normalized and validated; a bad input is an error, not a silent no-op.
+	TrustImageDomain(domain string) error
 	// StartExternalEdit opens the draft in the configured external editor
 	// and returns a correlation id; the result arrives via
 	// OnExternalEditDone when the editor exits.

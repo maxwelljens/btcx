@@ -57,9 +57,13 @@ func (s *stubController) NewCompose(account string) contract.ComposeDraft {
 	s.record("NewCompose")
 	return contract.ComposeDraft{Account: account}
 }
-func (s *stubController) ReplyTo(account string, ref model.Ref, replyAll bool) contract.ComposeDraft {
+func (s *stubController) ReplyTo(account string, ref model.Ref, mode contract.ReplyMode) contract.ComposeDraft {
 	s.record("ReplyTo")
 	return contract.ComposeDraft{Account: account}
+}
+func (s *stubController) TrustImageDomain(domain string) error {
+	s.record("TrustImageDomain")
+	return nil
 }
 func (s *stubController) Forward(account string, ref model.Ref) contract.ComposeDraft {
 	s.record("Forward")

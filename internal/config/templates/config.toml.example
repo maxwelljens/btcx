@@ -66,6 +66,13 @@
 #
 # Attachments referenced inside the message itself (cid: images) are
 # always shown; they never touch the network.
+#
+# Per-domain exception: when reading a message you trust, click
+# "Always from <domain>" in the remote-content bar. btcx records the
+# sender's domain in remote_images.toml (next to this file) and loads
+# remote images in messages from it without asking. Edit or delete lines
+# there to change your mind; the file is maintained by btcx but safe to
+# edit by hand.
 # block_remote_content = true
 
 

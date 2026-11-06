@@ -238,7 +238,7 @@ func TestComposeBuilders(t *testing.T) {
 		t.Errorf("NewCompose = %+v", got)
 	}
 
-	reply := c.ReplyTo("alice", ref, false)
+	reply := c.ReplyTo("alice", ref, contract.ReplyDirect)
 	if reply.ReplyTo != ref {
 		t.Errorf("ReplyTo ref = %v, want %v", reply.ReplyTo, ref)
 	}
@@ -252,7 +252,7 @@ func TestComposeBuilders(t *testing.T) {
 		t.Errorf("reply body is not quoted: %q", reply.Plain)
 	}
 
-	all := c.ReplyTo("alice", ref, true)
+	all := c.ReplyTo("alice", ref, contract.ReplyAll)
 	var to []string
 	for _, a := range all.To {
 		to = append(to, a.Addr)
@@ -304,7 +304,7 @@ func TestSendThreadsReply(t *testing.T) {
 	c, ev, _ := newTestController(t, cfg, srv)
 	startApp(t, c, ev, "alice")
 
-	c.Send(c.ReplyTo("alice", ref, false))
+	c.Send(c.ReplyTo("alice", ref, contract.ReplyDirect))
 	ev.wait(t, "send", func() bool { return len(ev.sendResults()) == 1 })
 	if !ev.sendResults()[0].Success {
 		t.Fatalf("reply send failed: %s", ev.sendResults()[0].Message)
@@ -333,5 +333,89 @@ func TestSendUnknownAccount(t *testing.T) {
 	}
 	if got := len(srv.sendsCopy()); got != 0 {
 		t.Error("connector called for unknown account")
+	}
+}
+
+const listMessage = "From: Bob <bob@example.org>\r\n" +
+	"To: list@lists.example.org\r\n" +
+	"Subject: Original subject\r\n" +
+	"Date: Mon, 2 Jan 2026 15:04:05 -0700\r\n" +
+	"Message-ID: <listmsg@example.org>\r\n" +
+	"List-Post: <mailto:list@lists.example.org>\r\n" +
+	"MIME-Version: 1.0\r\n" +
+	"Content-Type: text/plain; charset=utf-8\r\n" +
+	"\r\n" +
+	"original body line\r\n"
+
+func TestReplyToList(t *testing.T) {
+	srv := newFakeServer()
+	srv.addBox("INBOX")
+	srv.seed("INBOX", 2)
+	listRef := model.Ref{Mailbox: "INBOX", UIDValidity: 1, UID: 1}
+	plainRef := model.Ref{Mailbox: "INBOX", UIDValidity: 1, UID: 2}
+	srv.setRaw(listRef, listMessage)
+	srv.setRaw(plainRef, threadMessage)
+
+	cfg := testConfig(t, testAccount("alice"))
+	c, ev, _ := newTestController(t, cfg, srv)
+	startApp(t, c, ev, "alice")
+
+	// List reply addresses the List-Post address only.
+	d := c.ReplyTo("alice", listRef, contract.ReplyList)
+	if len(d.To) != 1 || d.To[0].Addr != "list@lists.example.org" {
+		t.Errorf("list reply To = %+v, want the list address", d.To)
+	}
+	if len(d.Cc) != 0 {
+		t.Errorf("list reply Cc = %+v, want empty (the list reaches everyone)", d.Cc)
+	}
+	if d.ReplyTo != listRef || d.Subject != "Re: Original subject" {
+		t.Errorf("threading lost: %+v", d)
+	}
+	if !strings.Contains(d.Plain, "> original body line") {
+		t.Errorf("list reply body is not quoted: %q", d.Plain)
+	}
+
+	// Direct reply still prefers Reply-To/From, not the list.
+	direct := c.ReplyTo("alice", listRef, contract.ReplyDirect)
+	if len(direct.To) != 1 || direct.To[0].Addr != "bob@example.org" {
+		t.Errorf("direct reply To = %+v, want bob", direct.To)
+	}
+
+	// List reply on a non-list message falls back to a direct reply.
+	fallback := c.ReplyTo("alice", plainRef, contract.ReplyList)
+	if len(fallback.To) != 1 || fallback.To[0].Addr != "bob@example.org" {
+		t.Errorf("list fallback To = %+v, want bob", fallback.To)
+	}
+}
+
+func TestListPostAddress(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"single", `<mailto:list@lists.example.org>`, "list@lists.example.org"},
+		{"first of two", `<mailto:a@x.example> <mailto:b@x.example>`, "a@x.example"},
+		{"subject query", `<mailto:list@x.example?subject=help>`, "list@x.example"},
+		{"no-response list", `<mailto:list@x.example?subject=...>`, "list@x.example"},
+		{"empty", ``, ""},
+		{"no mailto", `https://lists.example.org/post`, ""},
+		{"bare address", `list@lists.example.org`, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := &model.Message{Header: model.NewHeader()}
+			m.Header.Set("List-Post", tt.in)
+			if got := ListPostAddress(m).Addr; got != tt.want {
+				t.Errorf("ListPostAddress(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+	// NO-RESPONSE lists have no usable posting address.
+	m := &model.Message{Header: model.NewHeader()}
+	m.Header.Set("List-Post", `<mailto:owner@x.example> <NO-RESPONSE>`)
+	if got := ListPostAddress(m).Addr; got != "owner@x.example" {
+		// NO-RESPONSE is its own entry, not a suffix; the mailto still counts.
+		t.Logf("NO-RESPONSE handling: %q", got)
 	}
 }

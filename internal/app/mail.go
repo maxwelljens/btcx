@@ -390,6 +390,8 @@ func (c *Controller) view(ctx context.Context, st *accountState, ref model.Ref, 
 	}
 	date, _ := msg.Date()
 	remote := strings.TrimSpace(msg.HTML) != "" && sanitize.ReferencesRemoteContent(msg.HTML)
+	allowed := c.trustedImagesAllowed(msg)
+	listPost := ListPostAddress(msg)
 	view := contract.MessageView{
 		Account:              st.cfg.Name,
 		Ref:                  ref,
@@ -399,13 +401,14 @@ func (c *Controller) view(ctx context.Context, st *accountState, ref model.Ref, 
 		Cc:                   msg.Cc(),
 		Date:                 date,
 		PangoBody:            body,
-		ShowRemoteContentBar: c.cfg.BlockRemoteContent && remote,
+		ShowRemoteContentBar: remote && !allowed,
 		RemoteImages:         inlineImages(msg),
 		Attachments:          attachmentInfos(msg),
 		Unread:               row.Unread,
 		Flagged:              row.Flagged,
+		ListPost:             listPost.Addr,
 	}
-	if remote && !c.cfg.BlockRemoteContent {
+	if remote && allowed {
 		view.RemoteImages = c.remoteImages(ctx, msg)
 	}
 	if strings.TrimSpace(msg.HTML) != "" {

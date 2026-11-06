@@ -165,12 +165,15 @@ type Controller struct {
 	// cacheBudget caps cacheSize; tests lower it so eviction is exercised
 	// without allocating 256 MiB.
 	cacheBudget int
-	nextEdit    contract.EditRequestID
-	lastErr     string
-	lastErrAt   time.Time
-	started     bool
-	startErr    error
-	closed      bool
+	// trustedImages holds sender domains whose remote images always load
+	// (persisted in remote_images.toml).
+	trustedImages map[string]bool
+	nextEdit      contract.EditRequestID
+	lastErr       string
+	lastErrAt     time.Time
+	started       bool
+	startErr      error
+	closed        bool
 
 	wg           sync.WaitGroup
 	shutdownOnce sync.Once
@@ -244,6 +247,14 @@ func New(cfg *config.Config, events contract.Events, logger *slog.Logger, connec
 	}
 	if len(c.order) > 0 {
 		c.active = c.order[0]
+	}
+	c.trustedImages = make(map[string]bool)
+	trusted, err := config.LoadTrustedImages(cfg.Dir)
+	if err != nil {
+		logger.Warn("app: cannot read trusted image domains", "err", err)
+	}
+	for _, d := range trusted {
+		c.trustedImages[d] = true
 	}
 	return c
 }
