@@ -1,0 +1,23 @@
+# Binaries
+/bin/
+/btcx
+*.exe
+
+# Go build/test artifacts
+*.test
+*.out
+coverage.html
+coverage.out
+
+# Editor/IDE
+.idea/
+.vscode/
+*.swp
+*~
+
+# OS
+.DS_Store
+
+# Local config never belongs in the repo
+config.toml
+accounts/

@@ -1,0 +1,29 @@
+# btcx general configuration.
+# Location: ~/.config/btcx/config.toml
+# All keys are optional; the values shown are the defaults.
+
+# Appearance: "system" follows the desktop preference.
+theme = "system"
+
+# External editor command template used by the "Edit in external editor"
+# action. {file} is replaced with the draft path (as one argument); if the
+# placeholder is absent the path is appended as the final argument.
+# The command is split shell-style but NEVER run through a shell.
+# TUI editors need a terminal wrapper, e.g.:
+#   editor = "alacritty -e nvim {file}"
+# Empty string means: $VISUAL, then $EDITOR, then "nvim" from $PATH.
+editor = ""
+
+# Watch accounts for new mail using IMAP IDLE and update the list live.
+watch = true
+
+# Privacy: never load remote images (tracking pixels) in HTML mail.
+# Remote images show as placeholders you can reveal per message.
+block_remote_content = true
+
+# Lua scripting: directory with *.lua files (empty = ~/.config/btcx/scripts).
+script_dir = ""
+script_enabled = true
+
+# Logging verbosity: "debug", "info", "warn" or "error".
+log_level = "info"
