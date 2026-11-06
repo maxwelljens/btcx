@@ -117,8 +117,7 @@ func (w *MainWindow) buildBody() gtk.Widgetter {
 	w.folders.SetSelectionMode(gtk.SelectionSingle)
 	w.folders.ConnectRowActivated(func(row *gtk.ListBoxRow) {
 		if i := int(row.Index()); i >= 0 && i < len(w.folderNames) {
-			w.folder = w.folderNames[i]
-			w.controller.SelectFolder(w.account, w.folder)
+			w.selectFolder(w.folderNames[i])
 		}
 	})
 	folderScroll := gtk.NewScrolledWindow()
@@ -179,12 +178,30 @@ func (w *MainWindow) setAccounts(accounts []contract.AccountInfo) {
 		if i < 0 || i >= len(w.accounts) || w.accounts[i].Name == w.account {
 			return
 		}
-		w.account = w.accounts[i].Name
-		if cached, ok := w.folderCache[w.account]; ok {
-			w.setFolders(w.account, cached)
-		}
-		w.controller.SelectAccount(w.account)
+		w.selectAccount(w.accounts[i].Name)
 	})
+}
+
+// selectAccount switches account. The previous account's mail, reader page and
+// images are not the new account's, so they are cleared until the app delivers
+// results; that also stops Reply from acting on the account we just left.
+func (w *MainWindow) selectAccount(account string) {
+	w.account = account
+	w.folder = "" // the account's current folder is not known yet
+	w.msgs.set(nil)
+	w.reader.clear()
+	w.setStatus("Loading "+account+"…", false)
+	if cached, ok := w.folderCache[account]; ok {
+		w.setFolders(account, cached)
+	}
+	w.controller.SelectAccount(account)
+}
+
+// selectFolder remembers the folder and asks the app for it. Results for any
+// other folder are dropped until the user changes selection again.
+func (w *MainWindow) selectFolder(folder string) {
+	w.folder = folder
+	w.controller.SelectFolder(w.account, folder)
 }
 
 // setFolders replaces the sidebar for an account and keeps the selection when
@@ -227,15 +244,35 @@ func (w *MainWindow) setFolders(account string, folders []contract.FolderInfo) {
 	}
 }
 
+// staleResult reports whether an async delivery belongs to a selection other
+// than the current one. Events may arrive out of order, so a result is only
+// shown while its account and folder still match what the user last asked for;
+// an empty side is "not known yet" and matches anything.
+func staleResult(account, folder, curAccount, curFolder string) bool {
+	if account != "" && curAccount != "" && account != curAccount {
+		return true
+	}
+	return folder != "" && curFolder != "" && folder != curFolder
+}
+
 // setMessages replaces the message list of the current folder or search.
 func (w *MainWindow) setMessages(account, folder string, rows []contract.MessageRow) {
-	if account != "" && account != w.account {
-		return
+	if staleResult(account, folder, w.account, w.folder) {
+		return // late result for an account or folder the user has left
 	}
 	if folder != "" {
 		w.folder = folder
 	}
 	w.msgs.set(rows)
+}
+
+// showMessage paints the reader, unless the view belongs to another account
+// and outlived the switch to the current one.
+func (w *MainWindow) showMessage(view contract.MessageView) {
+	if staleResult(view.Account, "", w.account, "") {
+		return
+	}
+	w.reader.show(view)
 }
 
 // searchChanged debounces typing and then either searches or, for an empty

@@ -86,6 +86,14 @@ func requireGTK(t *testing.T) {
 	}
 }
 
+// twoAccountController is a stubController with a second account, so account
+// switching can be exercised.
+type twoAccountController struct{ stubController }
+
+func (c *twoAccountController) Accounts() []contract.AccountInfo {
+	return []contract.AccountInfo{{Name: "work"}, {Name: "home"}}
+}
+
 func newTestWindow(t *testing.T, ctrl contract.Controller) *MainWindow {
 	t.Helper()
 	requireGTK(t)
@@ -164,6 +172,65 @@ func TestReaderShowsMessage(t *testing.T) {
 	})
 	if got := w.reader.view.Subject; got != "Hi" {
 		t.Errorf("reader subject = %q, want Hi", got)
+	}
+}
+
+// TestStaleResult pins the F7 guard: async results outlive the selection that
+// asked for them, so only a delivery for the current account and folder is
+// allowed to replace the message list.
+func TestStaleResult(t *testing.T) {
+	cases := []struct {
+		name                  string
+		account, folder       string
+		curAccount, curFolder string
+		stale                 bool
+	}{
+		{"same selection", "work", "INBOX", "work", "INBOX", false},
+		{"folder not known yet adopts", "work", "INBOX", "work", "", false},
+		{"account not known yet", "work", "INBOX", "", "", false},
+		{"previous account", "home", "INBOX", "work", "INBOX", true},
+		{"previous folder", "work", "Sent", "work", "INBOX", true},
+		{"empty delivery", "", "", "work", "INBOX", false},
+	}
+	for _, c := range cases {
+		if got := staleResult(c.account, c.folder, c.curAccount, c.curFolder); got != c.stale {
+			t.Errorf("%s: staleResult = %v, want %v", c.name, got, c.stale)
+		}
+	}
+}
+
+// TestAccountSwitchClearsView covers the rest of F7: leaving an account must
+// clear its mail and reader, and late results from it must not repaint either.
+func TestAccountSwitchClearsView(t *testing.T) {
+	w := newTestWindow(t, &twoAccountController{})
+	w.setMessages("work", "INBOX", []contract.MessageRow{{
+		Ref:     model.Ref{Mailbox: "INBOX", UID: 1},
+		Subject: "Hello",
+	}})
+	w.showMessage(contract.MessageView{Account: "work", Subject: "Hello", Date: time.Now()})
+	if len(w.msgs.rows) != 1 || w.reader.view.Subject != "Hello" {
+		t.Fatalf("setup: rows = %d, reader = %q", len(w.msgs.rows), w.reader.view.Subject)
+	}
+
+	w.selectAccount("home")
+	if len(w.msgs.rows) != 0 || w.msgs.model.NItems() != 0 {
+		t.Errorf("account switch kept %d rows", len(w.msgs.rows))
+	}
+	if w.reader.view.Subject != "" {
+		t.Errorf("account switch kept the reader on %q", w.reader.view.Subject)
+	}
+	if got := w.status.Text(); got != "Loading home…" {
+		t.Errorf("status = %q, want loading", got)
+	}
+
+	// Results for the account we left must be dropped.
+	w.setMessages("work", "INBOX", []contract.MessageRow{{
+		Ref:     model.Ref{Mailbox: "INBOX", UID: 1},
+		Subject: "Hello",
+	}})
+	w.showMessage(contract.MessageView{Account: "work", Subject: "Hello"})
+	if len(w.msgs.rows) != 0 || w.reader.view.Subject != "" {
+		t.Error("late results from the previous account were shown")
 	}
 }
 

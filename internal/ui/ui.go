@@ -144,7 +144,7 @@ func (a *app) OnNewMail(account string, row contract.MessageRow) {
 }
 
 func (a *app) OnMessageOpened(view contract.MessageView) {
-	a.onWindow(func(w *MainWindow) { w.reader.show(view) })
+	a.onWindow(func(w *MainWindow) { w.showMessage(view) })
 }
 
 func (a *app) OnSendResult(success bool, message string) {

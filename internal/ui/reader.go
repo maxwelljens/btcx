@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"image"
+	"strings"
 
 	// Register the common image formats for the dimension probe below.
 	_ "image/gif"
@@ -54,6 +55,7 @@ func (r *readerPane) newBox() *gtk.Box {
 func (r *readerPane) widget() *gtk.ScrolledWindow { return r.scroll }
 
 func (r *readerPane) clear() {
+	r.view = contract.MessageView{}
 	box := r.newBox()
 	hint := gtk.NewLabel("Select a message")
 	hint.AddCSSClass("dim-label")
@@ -207,13 +209,24 @@ func (r *readerPane) showImage(img contract.InlineImage, pb *gdkpixbuf.Pixbuf) {
 	win.Present()
 }
 
+// visibleAttachments lists the parts that get a save button: inline images are
+// already visible in the image strip, everything else — including inline
+// non-image parts with a Content-ID — must stay saveable.
+func visibleAttachments(list []contract.AttachmentInfo) []contract.AttachmentInfo {
+	var out []contract.AttachmentInfo
+	for _, a := range list {
+		if a.Inline && strings.HasPrefix(strings.ToLower(a.ContentType), "image/") {
+			continue
+		}
+		out = append(out, a)
+	}
+	return out
+}
+
 // attachments lists downloadable attachments as save buttons.
 func (r *readerPane) attachments(view contract.MessageView) gtk.Widgetter {
 	var box *gtk.Box
-	for _, a := range view.Attachments {
-		if a.Inline {
-			continue // inline resources are shown in the image strip
-		}
+	for _, a := range visibleAttachments(view.Attachments) {
 		if box == nil {
 			box = gtk.NewBox(gtk.OrientationVertical, 2)
 		}
