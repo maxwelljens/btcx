@@ -124,15 +124,43 @@ type Controller struct {
 
 var _ contract.Controller = (*Controller)(nil)
 
-// New returns a controller for cfg. events must be non-nil and safe for
-// concurrent use; connector nil selects the real IMAP/SMTP connector. A nil
-// cfg is a startup wiring error and panics.
+// SetEvents installs the UI event sink. The UI calls this at startup, before
+// Start, because the sink only exists once the widget layer is up; passing
+// nil reverts to the no-op sink. Must not race with Start.
+func (c *Controller) SetEvents(events contract.Events) {
+	if events == nil {
+		events = noopEvents{}
+	}
+	c.events = events
+}
+
+// noopEvents discards every callback (used until the UI attaches).
+type noopEvents struct{}
+
+func (noopEvents) OnStatus(string)                                  {}
+func (noopEvents) OnError(error)                                    {}
+func (noopEvents) OnFolders(string, []contract.FolderInfo)          {}
+func (noopEvents) OnMessages(string, string, []contract.MessageRow) {}
+func (noopEvents) OnMessageChanged(contract.MessageRow)             {}
+func (noopEvents) OnNewMail(string, contract.MessageRow)            {}
+func (noopEvents) OnMessageOpened(contract.MessageView)             {}
+func (noopEvents) OnSendResult(bool, string)                        {}
+func (noopEvents) OnExternalEditDone(contract.EditRequestID, contract.ComposeDraft, error) {
+}
+
+// New returns a controller for cfg. events may be nil when the UI will call
+// SetEvents before Start; otherwise it must be safe for concurrent use.
+// connector nil selects the real IMAP/SMTP connector. A nil cfg is a startup
+// wiring error and panics.
 func New(cfg *config.Config, events contract.Events, logger *slog.Logger, connector Connector) *Controller {
 	if cfg == nil {
 		panic("app: nil config")
 	}
 	if logger == nil {
 		logger = slog.Default()
+	}
+	if events == nil {
+		events = noopEvents{}
 	}
 	if connector == nil {
 		connector = realConnector{log: logger}

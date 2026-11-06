@@ -160,6 +160,23 @@ func (c *Controller) remoteImages(ctx context.Context, msg *model.Message) []con
 	return images
 }
 
+// inlineImages resolves the message's inline cid: resources (local bytes,
+// no network involved) for display in the image strip.
+func inlineImages(msg *model.Message) []contract.InlineImage {
+	var images []contract.InlineImage
+	for _, a := range msg.Attachments {
+		if a.ContentID == "" || !strings.HasPrefix(a.ContentType, "image/") {
+			continue
+		}
+		images = append(images, contract.InlineImage{
+			URL:         "cid:" + a.ContentID,
+			ContentType: a.ContentType,
+			Data:        a.Data,
+		})
+	}
+	return images
+}
+
 // fetchImage downloads one image, reporting failures in the result rather than
 // failing the whole batch.
 func (c *Controller) fetchImage(ctx context.Context, rawURL string) contract.InlineImage {

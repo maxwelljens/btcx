@@ -337,6 +337,7 @@ func (c *Controller) view(st *accountState, ref model.Ref, msg *model.Message) c
 		Date:                 date,
 		PangoBody:            body,
 		ShowRemoteContentBar: c.cfg.BlockRemoteContent && msg.HTML != "" && sanitize.ReferencesRemoteContent(msg.HTML),
+		RemoteImages:         inlineImages(msg),
 		Attachments:          attachmentInfos(msg),
 		Unread:               row.Unread,
 		Flagged:              row.Flagged,
