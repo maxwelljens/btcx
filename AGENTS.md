@@ -170,7 +170,16 @@ Mail content, server responses, and filenames are untrusted input.
   or `password_command`, signature, sent/drafts folders.
 
 All files are TOML. Unknown keys warn (forward compatibility); invalid values
-fail validation with a precise message. Sample files live in `docs/`.
+fail validation with a precise message.
+
+On first launch `config.Bootstrap` generates commented example files
+(`config.toml`, `accounts/example.toml.example`,
+`scripts/example.lua.example`) from the embedded templates in
+`internal/config/templates/` — the single source of truth, tutorial-grade,
+never overwritten afterwards. The UI's setup wizard (contract
+`CreateAccount`/`VerifyAccount`/`Reload`) writes real account files through
+`config.WriteAccount` (validated, 0600); hand-edited account files are
+picked up by `Reload` without a restart.
 
 ## Testing strategy
 
