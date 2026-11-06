@@ -10,11 +10,12 @@ import (
 )
 
 const (
-	windowWidth  = 1100
-	windowHeight = 720
-	foldersWidth = 190
-	searchDelay  = 300 // ms of typing silence before a search runs
-	statusDelay  = 6000
+	windowWidth        = 1100
+	windowHeight       = 720
+	foldersWidth       = 190
+	searchDelay        = 300 // ms of typing silence before a search runs
+	statusDelay        = 6000
+	reloadRefreshDelay = 400 // ms after Reload before the account list is re-read
 )
 
 // MainWindow is the application window: folder sidebar, message list, reader
@@ -27,8 +28,11 @@ type MainWindow struct {
 
 	accounts  []contract.AccountInfo
 	accountDD *gtk.DropDown
+	ddWired   bool
 	search    *gtk.SearchEntry
 	searchSrc glib.SourceHandle
+
+	stack *gtk.Stack
 
 	folders     *gtk.ListBox
 	folderNames []string
@@ -61,7 +65,10 @@ func newMainWindow(a *app) *MainWindow {
 
 	w.msgs = newMessageList(w)
 	w.reader = newReaderPane(w)
-	w.SetChild(w.buildBody())
+	w.stack = gtk.NewStack()
+	w.stack.AddNamed(w.buildBody(), "mail")
+	w.stack.AddNamed(w.buildWelcome(), "welcome")
+	w.SetChild(w.stack)
 	w.addActions()
 
 	w.account = w.controller.ActiveAccount()
@@ -87,6 +94,11 @@ func (w *MainWindow) buildHeader() *gtk.HeaderBar {
 	left := gtk.NewBox(gtk.OrientationHorizontal, 6)
 	left.Append(menuBtn)
 	left.Append(w.accountDD)
+
+	addAccount := gtk.NewButtonFromIconName("list-add-symbolic")
+	addAccount.SetTooltipText("Add an account…")
+	addAccount.ConnectClicked(func() { w.app.openSetup() })
+	left.Append(addAccount)
 	bar.PackStart(left)
 
 	w.search = gtk.NewSearchEntry()
@@ -173,12 +185,121 @@ func (w *MainWindow) setAccounts(accounts []contract.AccountInfo) {
 	}
 	w.accountDD.SetModel(gtk.NewStringList(names))
 	w.accountDD.SetSelected(selected)
-	w.accountDD.NotifyProperty("selected", func() {
-		i := int(w.accountDD.Selected())
-		if i < 0 || i >= len(w.accounts) || w.accounts[i].Name == w.account {
-			return
+	if !w.ddWired {
+		w.ddWired = true
+		w.accountDD.NotifyProperty("selected", func() {
+			i := int(w.accountDD.Selected())
+			if i < 0 || i >= len(w.accounts) || w.accounts[i].Name == w.account {
+				return
+			}
+			w.selectAccount(w.accounts[i].Name)
+		})
+	}
+	w.updateEmptyState()
+}
+
+// knowsAccount reports whether the switcher already lists name.
+func (w *MainWindow) knowsAccount(name string) bool {
+	for _, a := range w.accounts {
+		if a.Name == name {
+			return true
 		}
-		w.selectAccount(w.accounts[i].Name)
+	}
+	return false
+}
+
+// updateEmptyState swaps between the mail panes and the first-run welcome
+// page, so an unconfigured btcx never looks broken.
+func (w *MainWindow) updateEmptyState() {
+	if w.stack == nil {
+		return
+	}
+	if len(w.accounts) == 0 {
+		w.stack.SetVisibleChildName("welcome")
+		return
+	}
+	w.stack.SetVisibleChildName("mail")
+}
+
+// buildWelcome is the page shown while no account is configured.
+func (w *MainWindow) buildWelcome() gtk.Widgetter {
+	box := gtk.NewBox(gtk.OrientationVertical, 14)
+	box.SetHAlign(gtk.AlignCenter)
+	box.SetVAlign(gtk.AlignCenter)
+	box.SetSizeRequest(520, -1)
+
+	heading := gtk.NewLabel("Welcome to btcx")
+	heading.AddCSSClass("title-1")
+	heading.SetHAlign(gtk.AlignCenter)
+	box.Append(heading)
+
+	intro := gtk.NewLabel("A lean mail client: read, compose and search your mail — nothing else. Set up an account to get started.")
+	intro.SetWrap(true)
+	intro.SetJustify(gtk.JustifyCenter)
+	intro.SetHAlign(gtk.AlignCenter)
+	intro.AddCSSClass("dim-label")
+	box.Append(intro)
+
+	setup := gtk.NewButtonWithLabel("Set up an account…")
+	setup.AddCSSClass("suggested-action")
+	setup.AddCSSClass("pill")
+	setup.SetHAlign(gtk.AlignCenter)
+	setup.ConnectClicked(func() { w.app.openSetup() })
+	box.Append(setup)
+
+	links := gtk.NewBox(gtk.OrientationHorizontal, 8)
+	links.SetHAlign(gtk.AlignCenter)
+
+	open := gtk.NewButtonWithLabel("Open config folder")
+	open.AddCSSClass("flat")
+	if w.app.opts.ConfigDir == "" {
+		open.SetSensitive(false)
+	} else {
+		open.ConnectClicked(func() { w.app.openPath(w.app.opts.ConfigDir) })
+	}
+	links.Append(open)
+
+	example := gtk.NewButtonWithLabel("View example account file")
+	example.AddCSSClass("flat")
+	if w.app.examplePath() == "" {
+		example.SetSensitive(false)
+	} else {
+		example.ConnectClicked(func() { w.app.openPath(w.app.examplePath()) })
+	}
+	links.Append(example)
+
+	reload := gtk.NewButtonWithLabel("Reload configuration")
+	reload.AddCSSClass("flat")
+	reload.ConnectClicked(w.reloadConfig)
+	links.Append(reload)
+	box.Append(links)
+
+	configDir := w.app.opts.ConfigDir
+	if configDir == "" {
+		configDir = "your btcx config directory"
+	}
+	footer := gtk.NewLabel("btcx never loads remote content or runs scripts from mail unless you ask. Configuration lives in " + configDir + ".")
+	footer.SetWrap(true)
+	footer.SetJustify(gtk.JustifyCenter)
+	footer.SetHAlign(gtk.AlignCenter)
+	footer.AddCSSClass("dim-label")
+	box.Append(footer)
+
+	return &box.Widget
+}
+
+// reloadConfig re-reads the configuration directory and refreshes accounts;
+// used by the welcome page button and after the setup window writes one.
+func (w *MainWindow) reloadConfig() {
+	w.controller.Reload()
+	w.setAccounts(w.controller.Accounts())
+	w.setStatus("Configuration reloaded", false)
+	// shortcut: Reload has no completion event and runs in the background, so
+	// look again shortly after; upgrade to an AccountsChanged event if reload
+	// ever gets slower than this.
+	glib.TimeoutAdd(reloadRefreshDelay, func() bool {
+		w.setAccounts(w.controller.Accounts())
+		return false
 	})
 }
 
@@ -208,6 +329,11 @@ func (w *MainWindow) selectFolder(folder string) {
 // the folder list is re-delivered.
 func (w *MainWindow) setFolders(account string, folders []contract.FolderInfo) {
 	w.folderCache[account] = folders
+	// A reload delivers folders for accounts the switcher has not learned
+	// about yet: there is no account-list event, so learn it here.
+	if account != "" && !w.knowsAccount(account) {
+		w.setAccounts(w.controller.Accounts())
+	}
 	if account != w.account {
 		return
 	}

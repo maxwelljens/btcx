@@ -22,6 +22,7 @@
 package ui
 
 import (
+	"path/filepath"
 	"sync"
 
 	"github.com/diamondburned/gotk4/pkg/gio/v2"
@@ -36,6 +37,15 @@ type Options struct {
 	Title   string // window title, e.g. "btcx"
 	Theme   string // "system" | "dark" | "light"
 	Version string // shown in the About dialog and the window subtitle
+
+	// ConfigDir is the btcx configuration directory. The welcome page opens
+	// it in the file manager and offers the example account file from it.
+	ConfigDir string
+	// FirstRun is true when the program generated the example configuration
+	// on this launch; the setup window then explains what was created.
+	FirstRun bool
+	// GeneratedFiles lists what FirstRun created, relative to ConfigDir.
+	GeneratedFiles []string
 }
 
 // Run builds the GTK application, wires controller and events, runs the main
@@ -89,6 +99,7 @@ type app struct {
 	controller contract.Controller
 	gtkApp     *gtk.Application
 	win        *MainWindow
+	setup      *SetupWindow // main-loop only, guarded by being created there
 
 	mu       sync.Mutex
 	composes map[*ComposeWindow]struct{}
@@ -145,6 +156,14 @@ func (a *app) OnNewMail(account string, row contract.MessageRow) {
 
 func (a *app) OnMessageOpened(view contract.MessageView) {
 	a.onWindow(func(w *MainWindow) { w.showMessage(view) })
+}
+
+func (a *app) OnVerifyResult(result contract.VerifyResult) {
+	a.idle(func() {
+		if a.setup != nil {
+			a.setup.showVerify(result)
+		}
+	})
 }
 
 func (a *app) OnSendResult(success bool, message string) {
@@ -256,4 +275,34 @@ func (a *app) showAbout() {
 		version = "development"
 	}
 	a.showDialog("btcx", "btcx — a lean mail user agent\nVersion "+version, false)
+}
+
+// openSetup raises the setup window, creating it the first time.
+func (a *app) openSetup() {
+	if a.setup != nil {
+		a.setup.Present()
+		return
+	}
+	a.setup = newSetupWindow(a, a.win)
+	a.setup.Present()
+}
+
+// examplePath is the generated sample account file, or "" when no config
+// directory is known.
+func (a *app) examplePath() string {
+	if a.opts.ConfigDir == "" {
+		return ""
+	}
+	return filepath.Join(a.opts.ConfigDir, "accounts", "example.toml.example")
+}
+
+// openPath opens a file or folder in the user's default application.
+func (a *app) openPath(path string) {
+	if path == "" {
+		return
+	}
+	uri := gio.NewFileForPath(path).URI()
+	if err := gio.AppInfoLaunchDefaultForURI(uri, nil); err != nil {
+		a.showDialog("Cannot open "+path, err.Error(), true)
+	}
 }

@@ -72,6 +72,12 @@ func (s *stubController) StartExternalEdit(draft contract.ComposeDraft) contract
 	s.record("StartExternalEdit")
 	return 1
 }
+func (s *stubController) CreateAccount(spec contract.AccountSpec) (string, error) {
+	s.record("CreateAccount")
+	return "accounts/" + spec.Name + ".toml", nil
+}
+func (s *stubController) VerifyAccount(spec contract.AccountSpec) { s.record("VerifyAccount") }
+func (s *stubController) Reload()                                 { s.record("Reload") }
 
 // requireGTK skips the test when no display is available, and initialises GTK
 // pinned to the test goroutine otherwise.
@@ -154,6 +160,65 @@ func TestMainWindowWidgets(t *testing.T) {
 	}
 	if len(ctrl.calls) == 0 || ctrl.calls[len(ctrl.calls)-1] != "OpenMessage" {
 		t.Errorf("calls = %v, want OpenMessage", ctrl.calls)
+	}
+}
+
+// emptyController reports no configured accounts, the first-run state.
+type emptyController struct{ stubController }
+
+func (c *emptyController) Accounts() []contract.AccountInfo { return nil }
+
+func TestEmptyStateWithoutAccounts(t *testing.T) {
+	w := newTestWindow(t, &emptyController{})
+	if got := w.stack.VisibleChildName(); got != "welcome" {
+		t.Errorf("empty account list shows %q, want welcome", got)
+	}
+	configured := newTestWindow(t, &stubController{})
+	if got := configured.stack.VisibleChildName(); got != "mail" {
+		t.Errorf("configured account shows %q, want mail", got)
+	}
+}
+
+func TestSetupWindowCollect(t *testing.T) {
+	w := newTestWindow(t, &stubController{})
+	s := newSetupWindow(w.app, w)
+	defer s.Close()
+
+	s.email.SetText("jane@example.org")
+	if got := s.name.Text(); got != "exampleorg" {
+		t.Errorf("account name = %q, want exampleorg", got)
+	}
+	if got := s.imapUser.Text(); got != "jane@example.org" {
+		t.Errorf("IMAP user = %q, want the address", got)
+	}
+
+	if _, err := s.collect(); err == nil {
+		t.Error("collect accepted a form without credentials or servers")
+	}
+
+	s.imapHost.SetText("imap.example.org")
+	s.smtpHost.SetText("smtp.example.org")
+	s.password.SetText("secret")
+	spec, err := s.collect()
+	if err != nil {
+		t.Fatalf("collect: %v", err)
+	}
+	if spec.IMAP.Port != 993 || spec.SMTP.Port != 587 {
+		t.Errorf("ports = %d/%d, want 993/587", spec.IMAP.Port, spec.SMTP.Port)
+	}
+	if spec.SMTP.TLS != "starttls" || spec.IMAP.TLS != "tls" {
+		t.Errorf("TLS = %q/%q", spec.IMAP.TLS, spec.SMTP.TLS)
+	}
+
+	s.passStack.SetVisibleChildName("command")
+	s.password.SetText("")
+	s.passCommand.SetText("pass show mail/example.org")
+	spec, err = s.collect()
+	if err != nil {
+		t.Fatalf("collect with password command: %v", err)
+	}
+	if spec.Password != "" || spec.PasswordCommand == "" {
+		t.Errorf("password = %q, command = %q", spec.Password, spec.PasswordCommand)
 	}
 }
 
@@ -299,6 +364,7 @@ func TestEventsMarshalOntoMainLoop(t *testing.T) {
 		a.OnStatus("busy")
 		a.OnError(errors.New("boom"))
 		a.OnSendResult(true, "fine")
+		a.OnVerifyResult(contract.VerifyResult{})
 		a.OnExternalEditDone(42, contract.ComposeDraft{}, errors.New("gone"))
 		close(done)
 	}()
