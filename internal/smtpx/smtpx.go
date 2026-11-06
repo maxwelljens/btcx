@@ -98,52 +98,64 @@ func Send(ctx context.Context, cfg SendConfig, raw []byte, rcpts []model.Address
 		raw = append(raw[:len(raw):len(raw)], '\r', '\n')
 	}
 
+	c, closer, err := connect(ctx, cfg)
+	if err != nil {
+		return fmt.Errorf("smtpx: %w", err)
+	}
+	defer closer()
+
+	if cfg.Username != "" {
+		if err := authenticate(c, cfg); err != nil {
+			return fmt.Errorf("smtpx: %w", err)
+		}
+	}
+	return transact(ctx, c, cfg, raw, rcpts)
+}
+
+// connect dials the server, encrypts the session and reads the greeting,
+// returning a client ready for AUTH. Cancelling ctx closes the socket for the
+// rest of the session, so the caller must call close when done.
+func connect(ctx context.Context, cfg SendConfig) (*smtp.Client, func(), error) {
 	timeout := cfg.Timeout
 	if timeout <= 0 {
 		timeout = defaultTimeout
 	}
 	tlsCfg, err := cfg.tlsConfig()
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 
 	dialer := net.Dialer{Timeout: timeout}
 	addr := net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.port()))
 	conn, err := dialer.DialContext(ctx, "tcp", addr)
 	if err != nil {
-		return fmt.Errorf("smtpx: dial %s: %w", addr, err)
+		return nil, nil, fmt.Errorf("dial %s: %w", addr, err)
 	}
-	defer conn.Close()
 	// Closing the socket is what makes an in-flight command return as soon as
 	// ctx is cancelled or its deadline expires.
 	stop := context.AfterFunc(ctx, func() { conn.Close() })
-	defer stop()
+	closer := func() {
+		stop()
+		_ = conn.Close()
+	}
 
 	// go-smtp reads the greeting and runs the STARTTLS handshake without a
 	// context, so an expiry closes the socket; the deadline bounds any I/O in
 	// between.
 	connectCtx, cancelConnect := context.WithTimeout(ctx, timeout)
-	defer cancelConnect()
 	_ = conn.SetDeadline(time.Now().Add(timeout))
 	stopConnect := context.AfterFunc(connectCtx, func() { conn.Close() })
-
 	c, err := newClient(connectCtx, conn, cfg, tlsCfg)
 	stopConnect()
+	cancelConnect()
 	if err != nil {
-		return err
+		closer()
+		return nil, nil, err
 	}
-	defer c.Close()
 	_ = conn.SetDeadline(time.Time{})
 	c.CommandTimeout = timeout
 	c.SubmissionTimeout = timeout
-
-	if cfg.Username != "" {
-		if err := authenticate(c, cfg); err != nil {
-			return err
-		}
-	}
-	cancelConnect()
-	return transact(ctx, c, cfg, raw, rcpts)
+	return c, closer, nil
 }
 
 func (c SendConfig) port() int {
@@ -167,14 +179,14 @@ func (c SendConfig) tlsConfig() (*tls.Config, error) {
 	if c.CAFile != "" {
 		pemData, err := os.ReadFile(c.CAFile)
 		if err != nil {
-			return nil, fmt.Errorf("smtpx: read CA file: %w", err)
+			return nil, fmt.Errorf("read CA file: %w", err)
 		}
 		pool, err := x509.SystemCertPool()
 		if err != nil {
 			pool = x509.NewCertPool()
 		}
 		if !pool.AppendCertsFromPEM(pemData) {
-			return nil, fmt.Errorf("smtpx: no PEM certificates in %s", c.CAFile)
+			return nil, fmt.Errorf("no PEM certificates in %s", c.CAFile)
 		}
 		tc.RootCAs = pool
 	}
@@ -217,7 +229,7 @@ func newClient(ctx context.Context, conn net.Conn, cfg SendConfig, tlsCfg *tls.C
 	if cfg.TLS == TLSImplicit {
 		tc := tls.Client(conn, tlsCfg)
 		if err := tc.HandshakeContext(ctx); err != nil {
-			return nil, fmt.Errorf("smtpx: tls handshake: %w", err)
+			return nil, fmt.Errorf("tls handshake: %w", err)
 		}
 		return smtp.NewClient(tc), nil
 	}
@@ -228,16 +240,16 @@ func newClient(ctx context.Context, conn net.Conn, cfg SendConfig, tlsCfg *tls.C
 		// shortcut: go-smtp exposes no sentinel for a missing STARTTLS
 		// extension; upgrade when it does.
 		if strings.Contains(err.Error(), "doesn't support STARTTLS") {
-			return nil, errors.New("smtpx: server does not support STARTTLS")
+			return nil, errors.New("server does not support STARTTLS")
 		}
-		return nil, fmt.Errorf("smtpx: starttls: %w", err)
+		return nil, fmt.Errorf("starttls: %w", err)
 	}
 	return c, nil
 }
 
 func authenticate(c *smtp.Client, cfg SendConfig) error {
 	if _, ok := c.TLSConnectionState(); !ok {
-		return errors.New("smtpx: refusing to authenticate over plaintext")
+		return errors.New("refusing to authenticate over plaintext")
 	}
 	// Pick from the advertised mechanisms; "AUTH PLAIN LOGIN" is the common
 	// shape. An unavailable AUTH extension leaves the choice at PLAIN and lets
@@ -252,7 +264,7 @@ func authenticate(c *smtp.Client, cfg SendConfig) error {
 	}
 	if err := c.Auth(a); err != nil {
 		// Only the server's reply is folded in; never the password.
-		return fmt.Errorf("smtpx: authentication failed: %w", err)
+		return fmt.Errorf("authentication failed: %w", err)
 	}
 	return nil
 }

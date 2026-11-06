@@ -48,7 +48,10 @@ type fakeServer struct {
 	mu        sync.Mutex
 	boxes     []model.Mailbox
 	envelopes map[string][]model.Envelope
-	raw       map[model.Ref][]byte
+	// envelopesErr, when set, is returned alongside envelope rows to
+	// simulate a degraded fetch (server failure with usable mail).
+	envelopesErr error
+	raw          map[model.Ref][]byte
 	// rawByAccount overrides raw per account, so tests can give two accounts
 	// different bytes for the same ref.
 	rawByAccount map[string]map[model.Ref][]byte
@@ -162,6 +165,12 @@ func (s *fakeServer) watchEndCopy() []error {
 	return append([]error(nil), s.watchEnd...)
 }
 
+func (s *fakeServer) dialCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.dials
+}
+
 // awaitWatchStart blocks until some client entered Watch.
 func (s *fakeServer) awaitWatchStart(t *testing.T) {
 	t.Helper()
@@ -206,6 +215,9 @@ func (f *fakeClient) Envelopes(ctx context.Context, mailbox string, startUID uin
 		if count > 0 && len(out) >= count {
 			break
 		}
+	}
+	if f.s.envelopesErr != nil && len(out) > 0 {
+		return out, f.s.envelopesErr
 	}
 	return out, nil
 }
@@ -363,6 +375,7 @@ type recEvents struct {
 	newMail  []mailEvent
 	opened   []contract.MessageView
 	sends    []sendOutcome
+	verifies []contract.VerifyResult
 	edits    []editOutcome
 	notify   chan struct{}
 }
@@ -430,6 +443,13 @@ func (r *recEvents) OnMessageOpened(view contract.MessageView) {
 func (r *recEvents) OnSendResult(success bool, message string) {
 	r.mu.Lock()
 	r.sends = append(r.sends, sendOutcome{Success: success, Message: message})
+	r.mu.Unlock()
+	r.signal()
+}
+
+func (r *recEvents) OnVerifyResult(result contract.VerifyResult) {
+	r.mu.Lock()
+	r.verifies = append(r.verifies, result)
 	r.mu.Unlock()
 	r.signal()
 }
@@ -517,6 +537,12 @@ func (r *recEvents) editResults() []editOutcome {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return append([]editOutcome(nil), r.edits...)
+}
+
+func (r *recEvents) verifyResults() []contract.VerifyResult {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]contract.VerifyResult(nil), r.verifies...)
 }
 
 func (r *recEvents) statusList() []string {

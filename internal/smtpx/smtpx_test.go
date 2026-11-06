@@ -540,6 +540,123 @@ func TestInvalidConfig(t *testing.T) {
 	}
 }
 
+func TestVerifySuccess(t *testing.T) {
+	be := tlsBackend(t)
+	port := startServer(t, be)
+
+	if err := Verify(context.Background(), baseConfig(port)); err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if got := len(be.authAttempts()); got == 0 {
+		t.Error("Verify did not authenticate")
+	}
+	if got := len(be.messages()); got != 0 {
+		t.Errorf("Verify delivered %d messages, want 0", got)
+	}
+}
+
+func TestVerifyWithoutUsername(t *testing.T) {
+	be := tlsBackend(t)
+	port := startServer(t, be)
+	cfg := baseConfig(port)
+	cfg.Username, cfg.Password = "", ""
+
+	if err := Verify(context.Background(), cfg); err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if got := be.authAttempts(); len(got) != 0 {
+		t.Errorf("Verify authenticated without a username: %v", got)
+	}
+}
+
+func TestVerifyAuthFailure(t *testing.T) {
+	be := tlsBackend(t)
+	port := startServer(t, be)
+	cfg := baseConfig(port)
+	cfg.Password = "wrong-password"
+
+	err := Verify(context.Background(), cfg)
+	if err == nil {
+		t.Fatal("Verify succeeded with a bad password")
+	}
+	if !strings.Contains(err.Error(), "smtpx: verify:") || !strings.Contains(err.Error(), "authentication failed") {
+		t.Errorf("err = %v, want an authentication-stage failure", err)
+	}
+	if strings.Contains(err.Error(), cfg.Password) || strings.Contains(err.Error(), testPass) {
+		t.Errorf("err leaks the password: %v", err)
+	}
+}
+
+func TestVerifyRequiresSTARTTLS(t *testing.T) {
+	be := &testBackend{allowInsecure: true}
+	port := startServer(t, be)
+
+	err := Verify(context.Background(), baseConfig(port))
+	if err == nil || !strings.Contains(err.Error(), "does not support STARTTLS") {
+		t.Fatalf("err = %v, want STARTTLS refusal", err)
+	}
+	if got := be.authAttempts(); len(got) != 0 {
+		t.Errorf("Verify authenticated over plaintext: %v", got)
+	}
+}
+
+func TestVerifyTLSPolicy(t *testing.T) {
+	cert, caPEM := selfSignedCert(t)
+	caFile := filepath.Join(t.TempDir(), "ca.pem")
+	if err := os.WriteFile(caFile, caPEM, 0o600); err != nil {
+		t.Fatalf("write ca: %v", err)
+	}
+
+	tests := []struct {
+		name    string
+		mutate  func(*SendConfig)
+		wantErr string
+	}{
+		{name: "self-signed rejected by default", mutate: func(c *SendConfig) { c.InsecureSkipVerify = false }, wantErr: "certificate"},
+		{name: "insecure skip verify", mutate: func(c *SendConfig) { c.InsecureSkipVerify = true }},
+		{name: "ca file verifies", mutate: func(c *SendConfig) { c.CAFile = caFile }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			be := &testBackend{cert: &cert}
+			port := startServer(t, be)
+			cfg := baseConfig(port)
+			tt.mutate(&cfg)
+
+			err := Verify(context.Background(), cfg)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("Verify: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("err = %v, want it to mention %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestVerifyInvalidConfig(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*SendConfig)
+	}{
+		{name: "empty host", mutate: func(c *SendConfig) { c.Host = "" }},
+		{name: "bad tls mode", mutate: func(c *SendConfig) { c.TLS = 0 }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := baseConfig(587)
+			tt.mutate(&cfg)
+			var ve *ValidationError
+			if err := Verify(context.Background(), cfg); !errors.As(err, &ve) {
+				t.Fatalf("err = %v, want *ValidationError", err)
+			}
+		})
+	}
+}
+
 // stallingServer accepts SMTP connections and never sends a greeting, so both
 // the TLS handshake and the SMTP dialogue stall forever.
 func stallingServer(t *testing.T) int {
