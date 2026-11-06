@@ -312,8 +312,7 @@ func (c *ComposeWindow) send() {
 	if !ok {
 		return
 	}
-	c.app.trackSend(c)
-	c.app.controller.Send(draft)
+	c.app.trackSend(c.app.controller.Send(draft), c)
 }
 
 func (c *ComposeWindow) externalEdit() {

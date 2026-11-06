@@ -18,18 +18,28 @@ func (c *Controller) NewCompose(account string) contract.ComposeDraft {
 	return contract.ComposeDraft{Account: account}
 }
 
-// ReplyTo builds a reply draft of the requested kind. It may fetch the
-// original message from the server when it is not cached, so it can block
-// briefly when called from the UI thread; the reader pane has normally
-// cached it already. ReplyList on a message without List-Post falls back
-// to a direct reply so the action never dead-ends.
-func (c *Controller) ReplyTo(account string, ref model.Ref, mode contract.ReplyMode) contract.ComposeDraft {
+// StartReply builds a reply draft of the requested kind on a controller
+// goroutine and returns its correlation id; the draft arrives through
+// OnDraftReady.
+func (c *Controller) StartReply(account string, ref model.Ref, mode contract.ReplyMode) contract.EditRequestID {
+	id := c.nextDraftID()
+	c.goRun(func(ctx context.Context) {
+		c.events.OnDraftReady(id, c.buildReply(ctx, account, ref, mode))
+	})
+	return id
+}
+
+// buildReply builds a reply draft. It may fetch the original message from the
+// server. ReplyList on a message without List-Post falls back to a direct
+// reply so the action never dead-ends. On failure the returned draft carries
+// the account only; the error has been reported already.
+func (c *Controller) buildReply(ctx context.Context, account string, ref model.Ref, mode contract.ReplyMode) contract.ComposeDraft {
 	st := c.state(account)
 	if st == nil {
 		c.fail(fmt.Errorf("app: reply: unknown account %q", account))
 		return contract.ComposeDraft{Account: account}
 	}
-	msg, err := c.messageSync(st, ref)
+	msg, err := c.message(ctx, st, ref)
 	if err != nil {
 		c.fail(fmt.Errorf("app: reply to %s: %w", ref, err))
 		return contract.ComposeDraft{Account: account}
@@ -80,14 +90,25 @@ func ListPostAddress(m *model.Message) model.Address {
 	}
 }
 
-// Forward builds a forward draft carrying the original as an attachment.
-func (c *Controller) Forward(account string, ref model.Ref) contract.ComposeDraft {
+// StartForward builds a forward draft carrying the original as an attachment
+// on a controller goroutine; the draft arrives through OnDraftReady.
+func (c *Controller) StartForward(account string, ref model.Ref) contract.EditRequestID {
+	id := c.nextDraftID()
+	c.goRun(func(ctx context.Context) {
+		c.events.OnDraftReady(id, c.buildForward(ctx, account, ref))
+	})
+	return id
+}
+
+// buildForward builds a forward draft; on failure it carries only the account
+// and the error has been reported already.
+func (c *Controller) buildForward(ctx context.Context, account string, ref model.Ref) contract.ComposeDraft {
 	st := c.state(account)
 	if st == nil {
 		c.fail(fmt.Errorf("app: forward: unknown account %q", account))
 		return contract.ComposeDraft{Account: account}
 	}
-	msg, raw, err := c.messageSyncRaw(st, ref)
+	msg, raw, err := c.messageRaw(ctx, st, ref)
 	if err != nil {
 		c.fail(fmt.Errorf("app: forward %s: %w", ref, err))
 		return contract.ComposeDraft{Account: account}
@@ -104,22 +125,24 @@ func (c *Controller) Forward(account string, ref model.Ref) contract.ComposeDraf
 	return d
 }
 
-// Send delivers the draft in the background; the outcome arrives through
-// OnSendResult.
-func (c *Controller) Send(draft contract.ComposeDraft) {
+// Send delivers the draft in the background and returns the correlation id;
+// the outcome arrives through OnSendResult.
+func (c *Controller) Send(draft contract.ComposeDraft) contract.SendID {
+	id := c.nextSendID()
 	st := c.state(draft.Account)
 	if st == nil {
-		c.sendError(fmt.Errorf("app: send: unknown account %q", draft.Account))
-		return
+		c.sendError(id, fmt.Errorf("app: send: unknown account %q", draft.Account))
+		return id
 	}
-	c.goRun(func(ctx context.Context) { c.send(ctx, st, draft) })
+	c.goRun(func(ctx context.Context) { c.send(ctx, st, draft, id) })
+	return id
 }
 
 // send builds, vets, submits and records the draft.
-func (c *Controller) send(ctx context.Context, st *accountState, draft contract.ComposeDraft) {
+func (c *Controller) send(ctx context.Context, st *accountState, draft contract.ComposeDraft, id contract.SendID) {
 	msg, err := c.buildMessage(ctx, st, draft)
 	if err != nil {
-		c.sendError(fmt.Errorf("app: send: %w", err))
+		c.sendError(id, fmt.Errorf("app: send: %w", err))
 		return
 	}
 
@@ -128,7 +151,7 @@ func (c *Controller) send(ctx context.Context, st *accountState, draft contract.
 		ok, warnings := eng.BeforeSend(msg)
 		c.reportWarnings("before_send", warnings)
 		if !ok {
-			c.sendError(errors.New("sending was cancelled by a script"))
+			c.sendError(id, errors.New("sending was cancelled by a script"))
 			return
 		}
 	}
@@ -148,18 +171,18 @@ func (c *Controller) send(ctx context.Context, st *accountState, draft contract.
 	})
 	if err != nil {
 		c.afterSend(eng, msg, false, err.Error())
-		c.sendError(fmt.Errorf("app: send: %w", err))
+		c.sendError(id, fmt.Errorf("app: send: %w", err))
 		return
 	}
 
 	err = c.conn.Send(ctx, st.cfg, raw, rcpts)
 	c.afterSend(eng, msg, err == nil, errorText(err))
 	if err != nil {
-		c.sendError(fmt.Errorf("app: send: %w", err))
+		c.sendError(id, fmt.Errorf("app: send: %w", err))
 		return
 	}
 	c.appendSent(ctx, st, raw)
-	c.events.OnSendResult(true, "Message sent")
+	c.events.OnSendResult(id, true, "Message sent")
 }
 
 // SaveDraft appends the draft to the account's Drafts mailbox.
@@ -360,10 +383,10 @@ func (c *Controller) appendSent(ctx context.Context, st *accountState, raw []byt
 	}
 }
 
-// sendError reports a failed send to the user and the log.
-func (c *Controller) sendError(err error) {
+// sendError reports a failed send for attempt id to the user and the log.
+func (c *Controller) sendError(id contract.SendID, err error) {
 	c.log.Warn("app: send failed", "err", err)
-	c.events.OnSendResult(false, err.Error())
+	c.events.OnSendResult(id, false, err.Error())
 }
 
 // errorText renders err for script hooks without dereferencing nil.

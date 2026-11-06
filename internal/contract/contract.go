@@ -118,9 +118,13 @@ type ComposeDraft struct {
 	Attachments []DraftAttachment
 }
 
-// EditRequestID correlates an asynchronous external-editor session with
-// its OnExternalEditDone result.
+// EditRequestID correlates an asynchronous draft request with its result:
+// an external-editor session (OnExternalEditDone) or a reply/forward draft
+// build (OnDraftReady).
 type EditRequestID int
+
+// SendID correlates an asynchronous Send with its OnSendResult.
+type SendID int
 
 // ReplyMode selects which reply variant to build.
 type ReplyMode int
@@ -188,12 +192,17 @@ type Events interface {
 	OnNewMail(account string, row MessageRow)
 	// OnMessageOpened delivers the full message for the reader pane.
 	OnMessageOpened(view MessageView)
-	// OnSendResult reports the outcome of Send (script hooks may veto).
-	OnSendResult(success bool, message string)
+	// OnSendResult reports the outcome of the Send that returned id
+	// (script hooks may veto).
+	OnSendResult(id SendID, success bool, message string)
 	// OnVerifyResult reports the outcome of VerifyAccount.
 	OnVerifyResult(result VerifyResult)
 	// OnExternalEditDone returns the draft after the external editor exits.
 	OnExternalEditDone(id EditRequestID, draft ComposeDraft, err error)
+	// OnDraftReady delivers a draft built by StartReply or StartForward.
+	// On failure it still arrives (with only Account set) after the error,
+	// so the UI never waits forever for a window.
+	OnDraftReady(id EditRequestID, draft ComposeDraft)
 }
 
 // Controller is implemented by the application layer (internal/app) and
@@ -227,11 +236,17 @@ type Controller interface {
 	SaveAttachment(account string, ref model.Ref, index int, destPath string) error
 
 	NewCompose(account string) ComposeDraft
-	ReplyTo(account string, ref model.Ref, mode ReplyMode) ComposeDraft
-	Forward(account string, ref model.Ref) ComposeDraft
-	// Send queues the message for delivery; the result is reported via
-	// OnSendResult. before_send script hooks may veto.
-	Send(draft ComposeDraft)
+	// StartReply builds a reply draft asynchronously (it may fetch the
+	// original message) and returns a correlation id; the result arrives
+	// via OnDraftReady.
+	StartReply(account string, ref model.Ref, mode ReplyMode) EditRequestID
+	// StartForward builds a forward draft asynchronously; the result
+	// arrives via OnDraftReady.
+	StartForward(account string, ref model.Ref) EditRequestID
+	// Send queues the message for delivery and returns the correlation id
+	// of this attempt; the result is reported via OnSendResult.
+	// before_send script hooks may veto.
+	Send(draft ComposeDraft) SendID
 	// SaveDraft appends the draft to the account's Drafts mailbox.
 	SaveDraft(draft ComposeDraft)
 	// TrustImageDomain remembers (persistently) that remote images in

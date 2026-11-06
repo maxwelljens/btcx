@@ -50,10 +50,13 @@ func TestSendHappyPath(t *testing.T) {
 		Subject: "Hi",
 		Plain:   "Body",
 	}
-	c.Send(draft)
+	id := c.Send(draft)
 	ev.wait(t, "send result", func() bool { return len(ev.sendResults()) == 1 })
 
 	results := ev.sendResults()
+	if results[0].ID != id {
+		t.Fatalf("send result id = %d, want %d", results[0].ID, id)
+	}
 	if !results[0].Success {
 		t.Fatalf("send failed: %s", results[0].Message)
 	}
@@ -137,7 +140,7 @@ func TestSendFailureReported(t *testing.T) {
 	conn.sendErr = errors.New("smtp: 550 relay denied")
 	startApp(t, c, ev, "alice")
 
-	c.Send(contract.ComposeDraft{
+	id := c.Send(contract.ComposeDraft{
 		Account: "alice",
 		To:      []model.Address{{Addr: "bob@example.org"}},
 		Subject: "Hi",
@@ -146,6 +149,9 @@ func TestSendFailureReported(t *testing.T) {
 	ev.wait(t, "send result", func() bool { return len(ev.sendResults()) == 1 })
 
 	result := ev.sendResults()[0]
+	if result.ID != id {
+		t.Fatalf("send result id = %d, want %d", result.ID, id)
+	}
 	if result.Success {
 		t.Fatal("failed send reported as success")
 	}
@@ -238,7 +244,7 @@ func TestComposeBuilders(t *testing.T) {
 		t.Errorf("NewCompose = %+v", got)
 	}
 
-	reply := c.ReplyTo("alice", ref, contract.ReplyDirect)
+	reply := replyDraft(t, c, ev, "alice", ref, contract.ReplyDirect)
 	if reply.ReplyTo != ref {
 		t.Errorf("ReplyTo ref = %v, want %v", reply.ReplyTo, ref)
 	}
@@ -252,7 +258,7 @@ func TestComposeBuilders(t *testing.T) {
 		t.Errorf("reply body is not quoted: %q", reply.Plain)
 	}
 
-	all := c.ReplyTo("alice", ref, contract.ReplyAll)
+	all := replyDraft(t, c, ev, "alice", ref, contract.ReplyAll)
 	var to []string
 	for _, a := range all.To {
 		to = append(to, a.Addr)
@@ -265,7 +271,7 @@ func TestComposeBuilders(t *testing.T) {
 		t.Errorf("reply-all includes the account itself: %q", joined)
 	}
 
-	fwd := c.Forward("alice", ref)
+	fwd := forwardDraft(t, c, ev, "alice", ref)
 	if fwd.Subject != "Fwd: Original subject" {
 		t.Errorf("forward subject = %q", fwd.Subject)
 	}
@@ -304,7 +310,7 @@ func TestSendThreadsReply(t *testing.T) {
 	c, ev, _ := newTestController(t, cfg, srv)
 	startApp(t, c, ev, "alice")
 
-	c.Send(c.ReplyTo("alice", ref, contract.ReplyDirect))
+	c.Send(replyDraft(t, c, ev, "alice", ref, contract.ReplyDirect))
 	ev.wait(t, "send", func() bool { return len(ev.sendResults()) == 1 })
 	if !ev.sendResults()[0].Success {
 		t.Fatalf("reply send failed: %s", ev.sendResults()[0].Message)
@@ -361,7 +367,7 @@ func TestReplyToList(t *testing.T) {
 	startApp(t, c, ev, "alice")
 
 	// List reply addresses the List-Post address only.
-	d := c.ReplyTo("alice", listRef, contract.ReplyList)
+	d := replyDraft(t, c, ev, "alice", listRef, contract.ReplyList)
 	if len(d.To) != 1 || d.To[0].Addr != "list@lists.example.org" {
 		t.Errorf("list reply To = %+v, want the list address", d.To)
 	}
@@ -376,13 +382,13 @@ func TestReplyToList(t *testing.T) {
 	}
 
 	// Direct reply still prefers Reply-To/From, not the list.
-	direct := c.ReplyTo("alice", listRef, contract.ReplyDirect)
+	direct := replyDraft(t, c, ev, "alice", listRef, contract.ReplyDirect)
 	if len(direct.To) != 1 || direct.To[0].Addr != "bob@example.org" {
 		t.Errorf("direct reply To = %+v, want bob", direct.To)
 	}
 
 	// List reply on a non-list message falls back to a direct reply.
-	fallback := c.ReplyTo("alice", plainRef, contract.ReplyList)
+	fallback := replyDraft(t, c, ev, "alice", plainRef, contract.ReplyList)
 	if len(fallback.To) != 1 || fallback.To[0].Addr != "bob@example.org" {
 		t.Errorf("list fallback To = %+v, want bob", fallback.To)
 	}

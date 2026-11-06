@@ -55,7 +55,7 @@ const (
 	errorDedup = 30 * time.Second
 
 	// syncCallTimeout bounds the handful of Controller methods that must
-	// return a value synchronously (ReplyTo, Forward, SaveAttachment).
+	// return a value synchronously (SaveAttachment).
 	syncCallTimeout = 30 * time.Second
 )
 
@@ -169,6 +169,7 @@ type Controller struct {
 	// (persisted in remote_images.toml).
 	trustedImages map[string]bool
 	nextEdit      contract.EditRequestID
+	nextSend      contract.SendID
 	lastErr       string
 	lastErrAt     time.Time
 	started       bool
@@ -201,10 +202,11 @@ func (noopEvents) OnMessages(string, string, []contract.MessageRow) {}
 func (noopEvents) OnMessageChanged(contract.MessageRow)             {}
 func (noopEvents) OnNewMail(string, contract.MessageRow)            {}
 func (noopEvents) OnMessageOpened(contract.MessageView)             {}
-func (noopEvents) OnSendResult(bool, string)                        {}
+func (noopEvents) OnSendResult(contract.SendID, bool, string)       {}
 func (noopEvents) OnVerifyResult(contract.VerifyResult)             {}
 func (noopEvents) OnExternalEditDone(contract.EditRequestID, contract.ComposeDraft, error) {
 }
+func (noopEvents) OnDraftReady(contract.EditRequestID, contract.ComposeDraft) {}
 
 // New returns a controller for cfg. events may be nil when the UI will call
 // SetEvents before Start; otherwise it must be safe for concurrent use.
@@ -452,6 +454,22 @@ func (c *Controller) engine() *script.Engine {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.scripts
+}
+
+// nextDraftID allocates a correlation id for an async draft request.
+func (c *Controller) nextDraftID() contract.EditRequestID {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.nextEdit++
+	return c.nextEdit
+}
+
+// nextSendID allocates a correlation id for an async send.
+func (c *Controller) nextSendID() contract.SendID {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.nextSend++
+	return c.nextSend
 }
 
 // goRun runs fn on a controller goroutine of the current configuration

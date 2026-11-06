@@ -539,11 +539,11 @@ func (w *MainWindow) selectedRef() (contract.MessageRow, bool) {
 	return row, ok
 }
 
-// reply opens a reply draft for the selected message; the mode picks direct,
-// all or list.
+// reply starts building a reply draft for the selected message; the mode picks
+// direct, all or list. The draft arrives asynchronously via OnDraftReady.
 func (w *MainWindow) reply(mode contract.ReplyMode) {
 	if row, ok := w.selectedRef(); ok {
-		w.compose(w.controller.ReplyTo(w.account, row.Ref, mode))
+		w.controller.StartReply(w.account, row.Ref, mode)
 	}
 }
 
@@ -560,7 +560,7 @@ func (w *MainWindow) addActions() {
 		{"reply-all", []string{"<Control><Shift>r"}, func() { w.reply(contract.ReplyAll) }},
 		{"forward", []string{"<Control>l"}, func() {
 			if row, ok := w.selectedRef(); ok {
-				w.compose(w.controller.Forward(w.account, row.Ref))
+				w.controller.StartForward(w.account, row.Ref)
 			}
 		}},
 		{"search", []string{"<Control>f"}, func() { w.search.GrabFocus() }},

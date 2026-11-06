@@ -55,6 +55,7 @@ func NormalizeImageDomain(domain string) (string, error) {
 // is not an error (no domains trusted yet).
 func LoadTrustedImages(dir string) ([]string, error) {
 	path := filepath.Join(dir, TrustedImagesFile)
+	// #nosec G304 -- path is btcx's own fixed filename inside the config dir.
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {

@@ -22,6 +22,7 @@
 package ui
 
 import (
+	"log/slog"
 	"path/filepath"
 	"sync"
 
@@ -113,7 +114,7 @@ type app struct {
 	mu       sync.Mutex
 	composes map[*ComposeWindow]struct{}
 	edits    map[contract.EditRequestID]*ComposeWindow
-	sending  *ComposeWindow
+	sends    map[contract.SendID]*ComposeWindow
 }
 
 var _ contract.Events = (*app)(nil)
@@ -175,7 +176,7 @@ func (a *app) OnVerifyResult(result contract.VerifyResult) {
 	})
 }
 
-func (a *app) OnSendResult(success bool, message string) {
+func (a *app) OnSendResult(id contract.SendID, success bool, message string) {
 	a.idle(func() {
 		if message == "" {
 			message = "Message sent"
@@ -184,13 +185,15 @@ func (a *app) OnSendResult(success bool, message string) {
 			}
 		}
 		a.mu.Lock()
-		sender := a.sending
-		a.sending = nil
+		sender := a.sends[id]
+		delete(a.sends, id)
 		a.mu.Unlock()
+		if sender == nil {
+			slog.Default().Debug("ui: send result for an unknown compose window", "id", int(id))
+			return
+		}
 		if success {
-			if sender != nil {
-				sender.forceClose()
-			}
+			sender.forceClose()
 			a.setStatusOnMain(message)
 			return
 		}
@@ -208,11 +211,20 @@ func (a *app) setStatusOnMain(message string) {
 	}
 }
 
-// trackSend remembers which compose window is waiting for a send result.
-func (a *app) trackSend(c *ComposeWindow) {
+// trackSend remembers which compose window is waiting for send result id.
+func (a *app) trackSend(id contract.SendID, c *ComposeWindow) {
 	a.mu.Lock()
-	a.sending = c
+	if a.sends == nil {
+		a.sends = make(map[contract.SendID]*ComposeWindow)
+	}
+	a.sends[id] = c
 	a.mu.Unlock()
+}
+
+// OnDraftReady opens the draft StartReply/StartForward built. Any ready draft
+// is the one the user asked for, so it needs no window correlation.
+func (a *app) OnDraftReady(_ contract.EditRequestID, draft contract.ComposeDraft) {
+	a.onWindow(func(w *MainWindow) { w.compose(draft) })
 }
 
 func (a *app) OnExternalEditDone(id contract.EditRequestID, draft contract.ComposeDraft, err error) {

@@ -378,6 +378,7 @@ type mailEvent struct {
 }
 
 type sendOutcome struct {
+	ID      contract.SendID
 	Success bool
 	Message string
 }
@@ -386,6 +387,11 @@ type editOutcome struct {
 	ID    contract.EditRequestID
 	Draft contract.ComposeDraft
 	Err   error
+}
+
+type draftOutcome struct {
+	ID    contract.EditRequestID
+	Draft contract.ComposeDraft
 }
 
 type recEvents struct {
@@ -400,6 +406,7 @@ type recEvents struct {
 	sends    []sendOutcome
 	verifies []contract.VerifyResult
 	edits    []editOutcome
+	drafts   []draftOutcome
 	notify   chan struct{}
 }
 
@@ -463,9 +470,9 @@ func (r *recEvents) OnMessageOpened(view contract.MessageView) {
 	r.signal()
 }
 
-func (r *recEvents) OnSendResult(success bool, message string) {
+func (r *recEvents) OnSendResult(id contract.SendID, success bool, message string) {
 	r.mu.Lock()
-	r.sends = append(r.sends, sendOutcome{Success: success, Message: message})
+	r.sends = append(r.sends, sendOutcome{ID: id, Success: success, Message: message})
 	r.mu.Unlock()
 	r.signal()
 }
@@ -480,6 +487,13 @@ func (r *recEvents) OnVerifyResult(result contract.VerifyResult) {
 func (r *recEvents) OnExternalEditDone(id contract.EditRequestID, draft contract.ComposeDraft, err error) {
 	r.mu.Lock()
 	r.edits = append(r.edits, editOutcome{ID: id, Draft: draft, Err: err})
+	r.mu.Unlock()
+	r.signal()
+}
+
+func (r *recEvents) OnDraftReady(id contract.EditRequestID, draft contract.ComposeDraft) {
+	r.mu.Lock()
+	r.drafts = append(r.drafts, draftOutcome{ID: id, Draft: draft})
 	r.mu.Unlock()
 	r.signal()
 }
@@ -560,6 +574,12 @@ func (r *recEvents) editResults() []editOutcome {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return append([]editOutcome(nil), r.edits...)
+}
+
+func (r *recEvents) draftResults() []draftOutcome {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]draftOutcome(nil), r.drafts...)
 }
 
 func (r *recEvents) verifyResults() []contract.VerifyResult {

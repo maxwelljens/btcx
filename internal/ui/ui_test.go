@@ -57,19 +57,22 @@ func (s *stubController) NewCompose(account string) contract.ComposeDraft {
 	s.record("NewCompose")
 	return contract.ComposeDraft{Account: account}
 }
-func (s *stubController) ReplyTo(account string, ref model.Ref, mode contract.ReplyMode) contract.ComposeDraft {
-	s.record("ReplyTo")
-	return contract.ComposeDraft{Account: account}
+func (s *stubController) StartReply(account string, ref model.Ref, mode contract.ReplyMode) contract.EditRequestID {
+	s.record("StartReply")
+	return 1
 }
 func (s *stubController) TrustImageDomain(domain string) error {
 	s.record("TrustImageDomain")
 	return nil
 }
-func (s *stubController) Forward(account string, ref model.Ref) contract.ComposeDraft {
-	s.record("Forward")
-	return contract.ComposeDraft{Account: account}
+func (s *stubController) StartForward(account string, ref model.Ref) contract.EditRequestID {
+	s.record("StartForward")
+	return 2
 }
-func (s *stubController) Send(draft contract.ComposeDraft) { s.record("Send") }
+func (s *stubController) Send(draft contract.ComposeDraft) contract.SendID {
+	s.record("Send")
+	return 1
+}
 func (s *stubController) SaveDraft(draft contract.ComposeDraft) {
 	s.record("SaveDraft")
 }
@@ -400,9 +403,10 @@ func TestEventsMarshalOntoMainLoop(t *testing.T) {
 	go func() {
 		a.OnStatus("busy")
 		a.OnError(errors.New("boom"))
-		a.OnSendResult(true, "fine")
+		a.OnSendResult(1, true, "fine")
 		a.OnVerifyResult(contract.VerifyResult{})
 		a.OnExternalEditDone(42, contract.ComposeDraft{}, errors.New("gone"))
+		a.OnDraftReady(43, contract.ComposeDraft{})
 		close(done)
 	}()
 	<-done
