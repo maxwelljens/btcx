@@ -94,12 +94,16 @@ func (c *Controller) handleNewMail(ctx context.Context, st *accountState, uids [
 	}
 
 	c.mu.Lock()
-	viewing := st.folder == inboxName
+	// A search result list is a subset of the folder; merging new mail into it
+	// would mix folder rows into the search and corrupt the counts.
+	viewing := st.folder == inboxName && !st.searching
+	var rows []contract.MessageRow
 	if viewing {
 		st.rows = mergeRows(rowsFromEnvelopes(envs), st.rows)
 		st.counts[inboxName] = countRows(st.rows)
+		// Copy under the lock: flag updates mutate st.rows in place.
+		rows = append([]contract.MessageRow(nil), st.rows...)
 	}
-	rows := st.rows
 	c.mu.Unlock()
 
 	for _, env := range envs {
@@ -109,7 +113,7 @@ func (c *Controller) handleNewMail(ctx context.Context, st *accountState, uids [
 		}
 	}
 	if viewing {
-		c.events.OnMessages(st.cfg.Name, inboxName, append([]contract.MessageRow(nil), rows...))
+		c.events.OnMessages(st.cfg.Name, inboxName, rows)
 		c.events.OnFolders(st.cfg.Name, c.folderInfos(st))
 	}
 }

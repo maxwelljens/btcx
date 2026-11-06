@@ -275,6 +275,21 @@ func TestComposeBuilders(t *testing.T) {
 	if len(fwd.Attachments) != 1 || fwd.Attachments[0].ContentType != "message/rfc822" {
 		t.Errorf("forward attachments = %+v, want the original message", fwd.Attachments)
 	}
+	// The enclosed message must be the bytes from the server, not a
+	// re-serialization that mints a new Message-ID and Date.
+	enclosed := string(fwd.Attachments[0].Data)
+	for _, want := range []string{
+		"Message-ID: <orig@example.org>",
+		"Date: Mon, 2 Jan 2026 15:04:05 -0700",
+		"Subject: Original subject",
+	} {
+		if !strings.Contains(enclosed, want) {
+			t.Errorf("forwarded message missing %q verbatim:\n%s", want, enclosed)
+		}
+	}
+	if strings.Count(enclosed, "Message-ID:") != 1 {
+		t.Errorf("forwarded message has more than one Message-ID:\n%s", enclosed)
+	}
 }
 
 func TestSendThreadsReply(t *testing.T) {

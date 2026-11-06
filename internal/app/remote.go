@@ -86,8 +86,8 @@ func dialPublic(ctx context.Context, network, addr string) (net.Conn, error) {
 }
 
 // isPublicIP reports whether ip is safe to dial for remote content: it must
-// not be loopback, private (RFC 1918 / unique-local), link-local, multicast
-// or unspecified.
+// not be loopback, private (RFC 1918 / unique-local), link-local, multicast,
+// unspecified or inside a non-global special-purpose block.
 func isPublicIP(ip net.IP) bool {
 	if ip == nil ||
 		ip.IsLoopback() ||
@@ -99,12 +99,37 @@ func isPublicIP(ip net.IP) bool {
 		return false
 	}
 	if ip4 := ip.To4(); ip4 != nil {
-		return ip4[0] != 0 // refuse 0.0.0.0/8 beyond 0.0.0.0 itself
-	}
-	if len(ip) == net.IPv6len && (ip[0]&0xfe) == 0xfc {
+		if ip4[0] == 0 { // 0.0.0.0/8 beyond 0.0.0.0 itself
+			return false
+		}
+	} else if len(ip) == net.IPv6len && (ip[0]&0xfe) == 0xfc {
 		return false // fc00::/7 unique-local, belt and braces
 	}
+	for _, block := range nonPublicBlocks {
+		if block.Contains(ip) {
+			return false
+		}
+	}
 	return true
+}
+
+// nonPublicBlocks are the special-purpose ranges net.IP does not classify:
+// they are routable to infrastructure, not to a mail sender's image.
+var nonPublicBlocks = []*net.IPNet{
+	mustParseCIDR("100.64.0.0/10"), // shared address space (CGNAT)
+	mustParseCIDR("198.18.0.0/15"), // benchmarking
+	mustParseCIDR("192.0.0.0/24"),  // IETF protocol assignments
+	mustParseCIDR("240.0.0.0/4"),   // reserved, includes broadcast
+	mustParseCIDR("64:ff9b::/96"),  // NAT64
+}
+
+// mustParseCIDR parses a package-level block; a typo is a programmer error.
+func mustParseCIDR(s string) *net.IPNet {
+	_, block, err := net.ParseCIDR(s)
+	if err != nil {
+		panic("app: bad CIDR " + s)
+	}
+	return block
 }
 
 // LoadRemoteContent opts in to remote content for one message: the images the
@@ -124,7 +149,7 @@ func (c *Controller) LoadRemoteContent(account string, ref model.Ref) {
 			c.fail(fmt.Errorf("app: remote content %s: %w", ref, err))
 			return
 		}
-		view := c.view(st, ref, msg)
+		view := c.view(ctx, st, ref, msg)
 		view.ShowRemoteContentBar = false
 		view.RemoteImages = c.remoteImages(ctx, msg)
 		c.events.OnMessageOpened(view)
@@ -147,17 +172,7 @@ func (c *Controller) remoteImages(ctx context.Context, msg *model.Message) []con
 			images = append(images, c.fetchImage(ctx, u))
 		}
 	}
-	for _, a := range msg.Attachments {
-		if a.ContentID == "" {
-			continue
-		}
-		images = append(images, contract.InlineImage{
-			URL:         "cid:" + a.ContentID,
-			ContentType: a.ContentType,
-			Data:        a.Data,
-		})
-	}
-	return images
+	return append(images, inlineImages(msg)...)
 }
 
 // inlineImages resolves the message's inline cid: resources (local bytes,

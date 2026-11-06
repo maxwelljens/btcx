@@ -49,8 +49,11 @@ type fakeServer struct {
 	boxes     []model.Mailbox
 	envelopes map[string][]model.Envelope
 	raw       map[model.Ref][]byte
-	search    map[string][]uint32
-	watchUIDs []uint32
+	// rawByAccount overrides raw per account, so tests can give two accounts
+	// different bytes for the same ref.
+	rawByAccount map[string]map[model.Ref][]byte
+	search       map[string][]uint32
+	watchUIDs    []uint32
 
 	appends   []fakeAppend
 	moves     []fakeMove
@@ -67,6 +70,7 @@ func newFakeServer() *fakeServer {
 	return &fakeServer{
 		envelopes:    map[string][]model.Envelope{},
 		raw:          map[model.Ref][]byte{},
+		rawByAccount: map[string]map[model.Ref][]byte{},
 		search:       map[string][]uint32{},
 		watchStarted: make(chan struct{}),
 	}
@@ -104,6 +108,16 @@ func (s *fakeServer) setRaw(ref model.Ref, raw string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.raw[ref] = []byte(raw)
+}
+
+// setRawFor stores bytes only account sees for ref.
+func (s *fakeServer) setRawFor(account string, ref model.Ref, raw string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.rawByAccount[account] == nil {
+		s.rawByAccount[account] = map[model.Ref][]byte{}
+	}
+	s.rawByAccount[account][ref] = []byte(raw)
 }
 
 func (s *fakeServer) setSearch(mailbox, query string, uids []uint32) {
@@ -160,7 +174,10 @@ func (s *fakeServer) awaitWatchStart(t *testing.T) {
 
 // ---- fake IMAP client ----
 
-type fakeClient struct{ s *fakeServer }
+type fakeClient struct {
+	s       *fakeServer
+	account string
+}
 
 func (f *fakeClient) Mailboxes(ctx context.Context) ([]model.Mailbox, error) {
 	if err := ctx.Err(); err != nil {
@@ -199,7 +216,11 @@ func (f *fakeClient) RawMessage(ctx context.Context, mailbox string, uid uint32)
 	}
 	f.s.mu.Lock()
 	defer f.s.mu.Unlock()
-	raw, ok := f.s.raw[model.Ref{Mailbox: mailbox, UIDValidity: 1, UID: uid}]
+	ref := model.Ref{Mailbox: mailbox, UIDValidity: 1, UID: uid}
+	raw, ok := f.s.rawByAccount[f.account][ref]
+	if !ok {
+		raw, ok = f.s.raw[ref]
+	}
 	if !ok {
 		return nil, fmt.Errorf("fake: no message %s/%d", mailbox, uid)
 	}
@@ -290,7 +311,7 @@ func (f *fakeConnector) DialIMAP(ctx context.Context, a config.Account) (MailCli
 	if failing {
 		return nil, errors.New("fake: dial failed")
 	}
-	return &fakeClient{s: f.server}, nil
+	return &fakeClient{s: f.server, account: a.Name}, nil
 }
 
 func (f *fakeConnector) Send(ctx context.Context, a config.Account, raw []byte, rcpts []model.Address) error {

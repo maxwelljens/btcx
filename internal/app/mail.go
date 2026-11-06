@@ -61,7 +61,7 @@ func (c *Controller) loadFolder(ctx context.Context, st *accountState, folder st
 		return fmt.Errorf("load %q: %w", folder, err)
 	}
 	rows := rowsFromEnvelopes(envs)
-	c.storeRows(st, folder, rows)
+	c.storeRows(st, folder, rows, false)
 	c.events.OnMessages(st.cfg.Name, folder, rows)
 	c.events.OnFolders(st.cfg.Name, c.folderInfos(st))
 	return nil
@@ -126,7 +126,7 @@ func (c *Controller) Search(account, folder, query string) {
 			return
 		}
 		rows := rowsFromEnvelopes(envs)
-		c.storeRows(st, folder, rows)
+		c.storeRows(st, folder, rows, true)
 		c.events.OnMessages(st.cfg.Name, folder, rows)
 	})
 }
@@ -145,7 +145,7 @@ func (c *Controller) OpenMessage(account string, ref model.Ref) {
 			c.fail(fmt.Errorf("app: open %s: %w", ref, err))
 			return
 		}
-		view := c.view(st, ref, msg)
+		view := c.view(ctx, st, ref, msg)
 		row, known := c.row(st, ref)
 		if !known || row.Unread {
 			if err := c.applyFlags(ctx, st, ref, model.Flags{Seen: true}, model.Flags{}); err != nil {
@@ -260,74 +260,120 @@ func (c *Controller) SaveAttachment(account string, ref model.Ref, index int, de
 
 // storeRows installs rows as the current list. The slice is copied because
 // later flag updates mutate the stored rows, and the caller's slice may still
-// be read by the UI event it is about to pass on.
-func (c *Controller) storeRows(st *accountState, folder string, rows []contract.MessageRow) {
+// be read by the UI event it is about to pass on. Only a whole-folder list
+// updates the folder counts; a search result is a subset.
+func (c *Controller) storeRows(st *accountState, folder string, rows []contract.MessageRow, searching bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	st.folder = folder
 	st.rows = append([]contract.MessageRow(nil), rows...)
-	st.counts[folder] = countRows(st.rows)
+	st.searching = searching
+	if !searching {
+		st.counts[folder] = countRows(st.rows)
+	}
 }
 
 // message returns the parsed message for ref, fetching it when not cached.
 func (c *Controller) message(ctx context.Context, st *accountState, ref model.Ref) (*model.Message, error) {
-	c.mu.Lock()
-	cached := c.messages[ref]
-	c.mu.Unlock()
-	if cached != nil {
-		return cached, nil
+	msg, _, err := c.messageRaw(ctx, st, ref)
+	return msg, err
+}
+
+// messageRaw returns the parsed message and, when it came from the server, the
+// raw bytes it was parsed from.
+func (c *Controller) messageRaw(ctx context.Context, st *accountState, ref model.Ref) (*model.Message, []byte, error) {
+	if entry := c.cached(st.cfg.Name, ref); entry != nil {
+		return entry.msg, entry.raw, nil
 	}
 
 	cl, err := c.clientFor(ctx, st)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	raw, err := cl.RawMessage(ctx, ref.Mailbox, ref.UID)
 	if err != nil {
 		c.dropClient(st)
-		return nil, fmt.Errorf("fetch: %w", err)
+		return nil, nil, fmt.Errorf("fetch: %w", err)
 	}
 	msg, err := mailparse.ParseBytes(raw)
 	if err != nil {
-		return nil, fmt.Errorf("parse: %w", err)
+		return nil, nil, fmt.Errorf("parse: %w", err)
 	}
-	c.cacheMessage(ref, msg)
-	return msg, nil
+	c.cacheMessage(st.cfg.Name, ref, msg, raw)
+	return msg, raw, nil
 }
 
 // messageSync fetches a message for the synchronous Controller methods,
 // bounded by syncCallTimeout.
 func (c *Controller) messageSync(st *accountState, ref model.Ref) (*model.Message, error) {
+	msg, _, err := c.messageSyncRaw(st, ref)
+	return msg, err
+}
+
+// messageSyncRaw is messageSync with the raw bytes the message was fetched as.
+func (c *Controller) messageSyncRaw(st *accountState, ref model.Ref) (*model.Message, []byte, error) {
 	ctx, cancel := context.WithTimeout(c.ctx, syncCallTimeout)
 	defer cancel()
-	return c.message(ctx, st, ref)
+	return c.messageRaw(ctx, st, ref)
 }
 
-// cacheMessage stores msg, evicting the oldest entry beyond the cap.
-func (c *Controller) cacheMessage(ref model.Ref, msg *model.Message) {
+// cached returns the cached entry for account/ref, or nil.
+func (c *Controller) cached(account string, ref model.Ref) *cachedMessage {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if _, ok := c.messages[ref]; ok {
-		c.messages[ref] = msg
-		return
+	return c.messages[cacheKey{account: account, ref: ref}]
+}
+
+// cacheMessage stores msg and its raw bytes, evicting the oldest entries until
+// the entry cap and the byte budget are both satisfied.
+func (c *Controller) cacheMessage(account string, ref model.Ref, msg *model.Message, raw []byte) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	key := cacheKey{account: account, ref: ref}
+	entry := &cachedMessage{msg: msg, raw: raw}
+	if old, ok := c.messages[key]; ok {
+		c.cacheSize += entry.size() - old.size()
+		c.messages[key] = entry
+	} else {
+		c.messages[key] = entry
+		c.msgOrder = append(c.msgOrder, key)
+		c.cacheSize += entry.size()
 	}
-	c.messages[ref] = msg
-	c.msgOrder = append(c.msgOrder, ref)
-	for len(c.msgOrder) > maxCachedMessages {
-		delete(c.messages, c.msgOrder[0])
-		c.msgOrder = c.msgOrder[1:]
+	for len(c.msgOrder) > 0 && (len(c.msgOrder) > maxCachedMessages || c.cacheSize > c.cacheBudget) {
+		c.dropMessage(c.msgOrder[0])
 	}
 }
 
-// view builds the reader-pane content for msg.
-func (c *Controller) view(st *accountState, ref model.Ref, msg *model.Message) contract.MessageView {
+// dropMessage forgets one cached message and its recency slot. The caller holds
+// c.mu.
+func (c *Controller) dropMessage(key cacheKey) {
+	entry, ok := c.messages[key]
+	if !ok {
+		return
+	}
+	delete(c.messages, key)
+	c.cacheSize -= entry.size()
+	for i, k := range c.msgOrder {
+		if k == key {
+			c.msgOrder = append(c.msgOrder[:i], c.msgOrder[i+1:]...)
+			return
+		}
+	}
+}
+
+// view builds the reader-pane content for msg. When the account does not block
+// remote content, the referenced images are fetched here so the reader shows
+// them directly; otherwise the opt-in bar is shown instead.
+func (c *Controller) view(ctx context.Context, st *accountState, ref model.Ref, msg *model.Message) contract.MessageView {
 	row, _ := c.row(st, ref)
 	body := render.PangoFromPlain(msg.Plain)
 	if strings.TrimSpace(msg.HTML) != "" {
 		body = render.Pango(msg.HTML)
 	}
 	date, _ := msg.Date()
-	return contract.MessageView{
+	remote := strings.TrimSpace(msg.HTML) != "" && sanitize.ReferencesRemoteContent(msg.HTML)
+	view := contract.MessageView{
 		Account:              st.cfg.Name,
 		Ref:                  ref,
 		Subject:              msg.Subject(),
@@ -336,12 +382,16 @@ func (c *Controller) view(st *accountState, ref model.Ref, msg *model.Message) c
 		Cc:                   msg.Cc(),
 		Date:                 date,
 		PangoBody:            body,
-		ShowRemoteContentBar: c.cfg.BlockRemoteContent && msg.HTML != "" && sanitize.ReferencesRemoteContent(msg.HTML),
+		ShowRemoteContentBar: c.cfg.BlockRemoteContent && remote,
 		RemoteImages:         inlineImages(msg),
 		Attachments:          attachmentInfos(msg),
 		Unread:               row.Unread,
 		Flagged:              row.Flagged,
 	}
+	if remote && !c.cfg.BlockRemoteContent {
+		view.RemoteImages = c.remoteImages(ctx, msg)
+	}
+	return view
 }
 
 // attachmentInfos describes msg's attachments with sanitized names.
@@ -397,7 +447,7 @@ func (c *Controller) updateRow(st *accountState, ref model.Ref, update func(*con
 		row := st.rows[i]
 		// A search result list is a subset of the folder; only recompute the
 		// folder counts when the list is the whole folder.
-		if cnt, ok := st.counts[st.folder]; ok && st.folder == row.Ref.Mailbox && cnt.total == len(st.rows) {
+		if !st.searching {
 			st.counts[st.folder] = countRows(st.rows)
 		}
 		return row, true
@@ -425,7 +475,7 @@ func (c *Controller) removeRow(st *accountState, ref model.Ref) {
 	}
 	st.rows = kept
 	folder := st.folder
-	delete(c.messages, ref)
+	c.dropMessage(cacheKey{account: st.cfg.Name, ref: ref})
 	c.mu.Unlock()
 
 	c.events.OnMessages(st.cfg.Name, folder, kept)

@@ -47,12 +47,21 @@ func (c *Controller) Forward(account string, ref model.Ref) contract.ComposeDraf
 		c.fail(fmt.Errorf("app: forward: unknown account %q", account))
 		return contract.ComposeDraft{Account: account}
 	}
-	msg, err := c.messageSync(st, ref)
+	msg, raw, err := c.messageSyncRaw(st, ref)
 	if err != nil {
 		c.fail(fmt.Errorf("app: forward %s: %w", ref, err))
 		return contract.ComposeDraft{Account: account}
 	}
-	return draftFrom(account, compose.Forward(msg, identity(st.cfg), ""))
+	d := draftFrom(account, compose.Forward(msg, identity(st.cfg), ""))
+	// compose.Forward re-serializes the enclosed message, minting a fresh
+	// Message-ID and Date; keep the bytes from the server instead so the
+	// recipient sees the original message unchanged.
+	for i := range d.Attachments {
+		if len(raw) > 0 && d.Attachments[i].ContentType == "message/rfc822" {
+			d.Attachments[i].Data = raw
+		}
+	}
+	return d
 }
 
 // Send delivers the draft in the background; the outcome arrives through

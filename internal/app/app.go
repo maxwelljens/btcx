@@ -40,6 +40,11 @@ const (
 	// maxCachedMessages bounds the parsed-message cache (oldest evicted).
 	maxCachedMessages = 100
 
+	// maxCacheBytes bounds the total memory the parsed-message cache may hold:
+	// the bodies and attachments are server-controlled, so a message count
+	// alone cannot bound memory (100 x 64 MiB is not a budget).
+	maxCacheBytes = 256 << 20
+
 	// initialBackoff and maxBackoff bound reconnect delays.
 	initialBackoff = time.Second
 	maxBackoff     = time.Minute
@@ -86,11 +91,41 @@ type accountState struct {
 	folder   string
 	rows     []contract.MessageRow
 	watching bool
+	// searching marks rows as a search subset rather than the whole folder,
+	// so flag updates and new-mail merges leave the folder counts and list
+	// alone.
+	searching bool
 }
 
+// folderCount is a folder's total and unread message counts.
 type folderCount struct {
 	total  int
 	unread int
+}
+
+// cacheKey identifies a cached message. model.Ref is unique per server, so
+// two accounts can mint identical refs: the account must be part of the key
+// or one account would be served the other's mail.
+type cacheKey struct {
+	account string
+	ref     model.Ref
+}
+
+// cachedMessage is a parsed message and the raw bytes it was parsed from. The
+// raw form is kept so a forward can enclose the original verbatim instead of
+// a re-serialization that mints a new Message-ID and Date.
+type cachedMessage struct {
+	msg *model.Message
+	raw []byte
+}
+
+// size is the memory the entry is charged against the cache budget.
+func (e *cachedMessage) size() int {
+	n := len(e.raw) + len(e.msg.Plain) + len(e.msg.HTML)
+	for _, a := range e.msg.Attachments {
+		n += len(a.Data)
+	}
+	return n
 }
 
 // Controller implements contract.Controller.
@@ -109,14 +144,18 @@ type Controller struct {
 	order     []string
 	active    string
 	scripts   *script.Engine
-	messages  map[model.Ref]*model.Message
-	msgOrder  []model.Ref
-	nextEdit  contract.EditRequestID
-	lastErr   string
-	lastErrAt time.Time
-	started   bool
-	startErr  error
-	closed    bool
+	messages  map[cacheKey]*cachedMessage
+	msgOrder  []cacheKey
+	cacheSize int
+	// cacheBudget caps cacheSize; tests lower it so eviction is exercised
+	// without allocating 256 MiB.
+	cacheBudget int
+	nextEdit    contract.EditRequestID
+	lastErr     string
+	lastErrAt   time.Time
+	started     bool
+	startErr    error
+	closed      bool
 
 	wg           sync.WaitGroup
 	shutdownOnce sync.Once
@@ -167,15 +206,16 @@ func New(cfg *config.Config, events contract.Events, logger *slog.Logger, connec
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	c := &Controller{
-		cfg:      cfg,
-		events:   events,
-		log:      logger,
-		conn:     connector,
-		http:     newHTTPClient(),
-		ctx:      ctx,
-		cancel:   cancel,
-		accounts: make(map[string]*accountState, len(cfg.Accounts)),
-		messages: make(map[model.Ref]*model.Message),
+		cfg:         cfg,
+		events:      events,
+		log:         logger,
+		conn:        connector,
+		http:        newHTTPClient(),
+		ctx:         ctx,
+		cancel:      cancel,
+		accounts:    make(map[string]*accountState, len(cfg.Accounts)),
+		messages:    make(map[cacheKey]*cachedMessage),
+		cacheBudget: maxCacheBytes,
 	}
 	for _, a := range cfg.Accounts {
 		c.accounts[a.Name] = &accountState{cfg: a, counts: map[string]folderCount{}}
