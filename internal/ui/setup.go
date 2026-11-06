@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/diamondburned/gotk4/pkg/glib/v2"
 	"github.com/diamondburned/gotk4/pkg/gtk/v4"
 
 	"btcx/internal/contract"
@@ -30,11 +29,11 @@ type SetupWindow struct {
 	imapHost *gtk.Entry
 	imapPort *gtk.SpinButton
 	imapUser *gtk.Entry
-	imapTLS  *gtk.ComboBoxText
+	imapTLS  *gtk.DropDown
 	smtpHost *gtk.Entry
 	smtpPort *gtk.SpinButton
 	smtpUser *gtk.Entry
-	smtpTLS  *gtk.ComboBoxText
+	smtpTLS  *gtk.DropDown
 
 	passStack   *gtk.Stack
 	password    *gtk.PasswordEntry
@@ -304,11 +303,11 @@ func (s *SetupWindow) detect() {
 	s.imapHost.SetText(imap.Host)
 	s.imapPort.SetValue(float64(imap.Port))
 	s.imapUser.SetText(imap.Username)
-	s.imapTLS.SetActive(0)
+	s.imapTLS.SetSelected(0)
 	s.smtpHost.SetText(smtp.Host)
 	s.smtpPort.SetValue(float64(smtp.Port))
 	s.smtpUser.SetText(smtp.Username)
-	s.smtpTLS.SetActive(1)
+	s.smtpTLS.SetSelected(1)
 	s.autoUser = email
 	s.test()
 }
@@ -417,7 +416,7 @@ func (s *SetupWindow) handEdit() {
 	s.app.openPath(s.app.opts.ConfigDir)
 	s.close()
 	s.app.showDialog("Edit files by hand",
-		"Copy accounts/example.toml.example to accounts/yourname.toml and edit it, then press Reload configuration.", false)
+		"Copy accounts/example.toml.example to accounts/yourname.toml and edit it, then press Reload configuration.")
 }
 
 func (s *SetupWindow) showFormError(err error) {
@@ -426,11 +425,7 @@ func (s *SetupWindow) showFormError(err error) {
 }
 
 func (s *SetupWindow) showError(title, message string) {
-	dlg := gtk.NewMessageDialog(&s.Window, gtk.DialogModal, gtk.MessageError, gtk.ButtonsClose)
-	dlg.SetTitle(title)
-	dlg.SetMarkup("<b>" + glib.MarkupEscapeText(title) + "</b>\n\n" + glib.MarkupEscapeText(message))
-	dlg.ConnectResponse(func(int) { dlg.Destroy() })
-	dlg.Present()
+	alertWindow(&s.Window, title, message, "", "Close", nil)
 }
 
 func newFormGrid() *gtk.Grid {
@@ -473,16 +468,14 @@ func verifyLabel() *gtk.Label {
 	return l
 }
 
-func tlsCombo(active int) *gtk.ComboBoxText {
-	c := gtk.NewComboBoxText()
-	c.AppendText("TLS (recommended)")
-	c.AppendText("STARTTLS")
-	c.SetActive(active)
+func tlsCombo(active uint) *gtk.DropDown {
+	c := gtk.NewDropDownFromStrings([]string{"TLS (recommended)", "STARTTLS"})
+	c.SetSelected(active)
 	return c
 }
 
-func tlsAt(c *gtk.ComboBoxText) string {
-	if c.Active() == 1 {
+func tlsAt(c *gtk.DropDown) string {
+	if c.Selected() == 1 {
 		return "starttls"
 	}
 	return "tls"

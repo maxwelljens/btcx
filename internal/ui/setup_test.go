@@ -78,6 +78,20 @@ func TestValidateSpec(t *testing.T) {
 	}
 }
 
+// TestTLSComboRoundTrip pins the index-to-mode mapping the account file gets.
+func TestTLSComboRoundTrip(t *testing.T) {
+	requireGTK(t)
+	for active, want := range map[uint]string{0: "tls", 1: "starttls"} {
+		c := tlsCombo(active)
+		if got := c.Selected(); got != active {
+			t.Errorf("tlsCombo(%d).Selected() = %d", active, got)
+		}
+		if got := tlsAt(c); got != want {
+			t.Errorf("tlsCombo(%d) -> %q, want %q", active, got, want)
+		}
+	}
+}
+
 func TestGeneratedFilesText(t *testing.T) {
 	got := generatedFilesText([]string{"config.toml", "accounts/example.toml.example"})
 	want := "First launch — btcx created example configuration for you:\n" +

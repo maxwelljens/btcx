@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -207,25 +208,23 @@ func (c *ComposeWindow) rebuildAttachments() {
 
 // addAttachment reads files chosen by the user into the draft.
 func (c *ComposeWindow) addAttachment() {
-	chooser := gtk.NewFileChooserNative("Attach file", &c.Window,
-		gtk.FileChooserActionOpen, "Attach", "Cancel")
-	chooser.SetSelectMultiple(true)
-	chooser.ConnectResponse(func(response int) {
-		if response != int(gtk.ResponseAccept) {
-			return
-		}
-		files := chooser.Files()
-		if files == nil {
-			return
+	dlg := gtk.NewFileDialog()
+	dlg.SetTitle("Attach file")
+	dlg.SetAcceptLabel("Attach")
+	dlg.OpenMultiple(context.Background(), &c.Window, func(res gio.AsyncResulter) {
+		files, err := dlg.OpenMultipleFinish(res)
+		if err != nil || files == nil {
+			return // the user dismissed the dialog
 		}
 		for i := uint(0); i < files.NItems(); i++ {
 			path := asFile(files.Item(i)).Path()
 			if path == "" {
 				continue
 			}
+			//nolint:gosec // the path is the file the user just picked in the dialog
 			data, err := os.ReadFile(path)
 			if err != nil {
-				c.app.showDialog("Cannot attach file", err.Error(), true)
+				c.app.showDialog("Cannot attach file", err.Error())
 				continue
 			}
 			c.draft.Attachments = append(c.draft.Attachments, contract.DraftAttachment{
@@ -236,7 +235,6 @@ func (c *ComposeWindow) addAttachment() {
 		}
 		c.rebuildAttachments()
 	})
-	chooser.Show()
 }
 
 // asFile re-wraps a list-model item as a gio.File. gotk4 does not export the
@@ -329,18 +327,8 @@ func (c *ComposeWindow) externalEdit() {
 }
 
 func (c *ComposeWindow) confirmDiscard() {
-	dlg := gtk.NewMessageDialog(&c.Window, gtk.DialogModal, gtk.MessageQuestion, gtk.ButtonsNone)
-	dlg.SetTitle("Discard message?")
-	dlg.SetMarkup("<b>Discard this message?</b>\n\nIts content will be lost.")
-	dlg.AddButton("Keep editing", int(gtk.ResponseCancel))
-	dlg.AddButton("Discard", int(gtk.ResponseClose))
-	dlg.ConnectResponse(func(response int) {
-		dlg.Destroy()
-		if response == int(gtk.ResponseClose) {
-			c.forceClose()
-		}
-	})
-	dlg.Present()
+	alertWindow(&c.Window, "Discard message?", "Its content will be lost.",
+		"Keep editing", "Discard", c.forceClose)
 }
 
 // forceClose closes the window without asking.

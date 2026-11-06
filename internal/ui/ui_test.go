@@ -354,6 +354,26 @@ func TestExternalEditReplacesDraft(t *testing.T) {
 	}
 }
 
+// TestConfirmDiscardWaitsForTheUser guards the close gate: opening the
+// confirmation, and dismissing it, must never discard the draft by itself.
+func TestConfirmDiscardWaitsForTheUser(t *testing.T) {
+	requireGTK(t)
+	accepted := false
+	win := alertWindow(nil, "Discard message?", "Its content will be lost.",
+		"Keep editing", "Discard", func() { accepted = true })
+	ctx := glib.MainContextDefault()
+	for i := 0; i < 50; i++ {
+		ctx.Iteration(false)
+	}
+	win.Close()
+	for i := 0; i < 50; i++ {
+		ctx.Iteration(false)
+	}
+	if accepted {
+		t.Fatal("discard ran without the user accepting")
+	}
+}
+
 // TestEventsMarshalOntoMainLoop checks that Events calls from another goroutine
 // are queued on the GLib main loop instead of touching widgets directly. No
 // window exists, so the handlers are required to do nothing but be dispatched.

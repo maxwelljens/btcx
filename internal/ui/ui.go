@@ -25,6 +25,7 @@ import (
 	"path/filepath"
 	"sync"
 
+	"github.com/diamondburned/gotk4/pkg/gdk/v4"
 	"github.com/diamondburned/gotk4/pkg/gio/v2"
 	"github.com/diamondburned/gotk4/pkg/glib/v2"
 	"github.com/diamondburned/gotk4/pkg/gtk/v4"
@@ -188,7 +189,7 @@ func (a *app) OnSendResult(success bool, message string) {
 		if a.win != nil {
 			a.win.setStatus(message, true)
 		}
-		a.showDialog("Send failed", message, true)
+		a.showDialog("Send failed", message)
 	})
 }
 
@@ -216,7 +217,7 @@ func (a *app) OnExternalEditDone(id contract.EditRequestID, draft contract.Compo
 			return
 		}
 		if err != nil {
-			a.showDialog("External editor failed", err.Error(), true)
+			a.showDialog("External editor failed", err.Error())
 			return
 		}
 		win.applyDraft(draft)
@@ -228,20 +229,65 @@ func (a *app) OnExternalEditDone(id contract.EditRequestID, draft contract.Compo
 
 // showDialog reports a failure to the user. Modal dialogs are reserved for
 // errors the user has to acknowledge; everything else goes to the status bar.
-func (a *app) showDialog(title, message string, isError bool) {
+func (a *app) showDialog(title, message string) {
 	if a.win == nil {
 		return // nothing to parent a dialog to; there is no UI yet
 	}
-	parent := &a.win.Window
-	typ := gtk.MessageInfo
-	if isError {
-		typ = gtk.MessageError
+	alertWindow(&a.win.Window, title, message, "", "Close", nil)
+}
+
+// alertWindow shows a modal message with one or two buttons. gotk4 v0.4.1
+// wraps gtk.AlertDialog without a constructor, so this is the plain window the
+// GTK deprecation note of gtk.MessageDialog points at.
+func alertWindow(parent *gtk.Window, title, message, cancelLabel, acceptLabel string, onAccept func()) *gtk.Window {
+	win := gtk.NewWindow()
+	win.SetTitle(title)
+	win.SetTransientFor(parent)
+	win.SetModal(true)
+	win.SetResizable(false)
+
+	box := gtk.NewBox(gtk.OrientationVertical, 12)
+	box.SetMarginTop(18)
+	box.SetMarginBottom(18)
+	box.SetMarginStart(18)
+	box.SetMarginEnd(18)
+	text := gtk.NewLabel("<b>" + glib.MarkupEscapeText(title) + "</b>\n\n" + glib.MarkupEscapeText(message))
+	text.SetUseMarkup(true)
+	text.SetWrap(true)
+	text.SetMaxWidthChars(60)
+	text.SetXAlign(0)
+	box.Append(text)
+
+	buttons := gtk.NewBox(gtk.OrientationHorizontal, 8)
+	buttons.SetHAlign(gtk.AlignEnd)
+	if cancelLabel != "" {
+		cancel := gtk.NewButtonWithLabel(cancelLabel)
+		cancel.ConnectClicked(func() { win.Close() })
+		buttons.Append(cancel)
 	}
-	dlg := gtk.NewMessageDialog(parent, gtk.DialogModal, typ, gtk.ButtonsClose)
-	dlg.SetTitle(title)
-	dlg.SetMarkup("<b>" + glib.MarkupEscapeText(title) + "</b>\n\n" + glib.MarkupEscapeText(message))
-	dlg.ConnectResponse(func(int) { dlg.Destroy() })
-	dlg.Present()
+	accept := gtk.NewButtonWithLabel(acceptLabel)
+	accept.ConnectClicked(func() {
+		win.Close()
+		if onAccept != nil {
+			onAccept()
+		}
+	})
+	buttons.Append(accept)
+	box.Append(buttons)
+	win.SetChild(box)
+
+	// Esc must not accept a destructive action, so it only closes.
+	keys := gtk.NewEventControllerKey()
+	keys.ConnectKeyPressed(func(keyval, _ uint, _ gdk.ModifierType) bool {
+		if keyval != gdk.KEY_Escape {
+			return false
+		}
+		win.Close()
+		return true
+	})
+	win.AddController(keys)
+	win.Present()
+	return win
 }
 
 func (a *app) addCompose(c *ComposeWindow) {
@@ -274,7 +320,7 @@ func (a *app) showAbout() {
 	if version == "" {
 		version = "development"
 	}
-	a.showDialog("btcx", "btcx — a lean mail user agent\nVersion "+version, false)
+	a.showDialog("btcx", "btcx — a lean mail user agent\nVersion "+version)
 }
 
 // openSetup raises the setup window, creating it the first time.
@@ -303,6 +349,17 @@ func (a *app) openPath(path string) {
 	}
 	uri := gio.NewFileForPath(path).URI()
 	if err := gio.AppInfoLaunchDefaultForURI(uri, nil); err != nil {
-		a.showDialog("Cannot open "+path, err.Error(), true)
+		a.showDialog("Cannot open "+path, err.Error())
+	}
+}
+
+// openURL opens a link in the user's default handler. Links clicked in mail
+// never navigate inside btcx (the web view ignores all navigation).
+func (a *app) openURL(uri string) {
+	if uri == "" {
+		return
+	}
+	if err := gio.AppInfoLaunchDefaultForURI(uri, nil); err != nil {
+		a.showDialog("Cannot open link", err.Error())
 	}
 }

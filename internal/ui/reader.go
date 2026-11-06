@@ -2,6 +2,7 @@ package ui
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"image"
 	"strings"
@@ -11,7 +12,9 @@ import (
 	_ "image/jpeg"
 	_ "image/png"
 
+	"github.com/diamondburned/gotk4/pkg/gdk/v4"
 	"github.com/diamondburned/gotk4/pkg/gdkpixbuf/v2"
+	"github.com/diamondburned/gotk4/pkg/gio/v2"
 	"github.com/diamondburned/gotk4/pkg/gtk/v4"
 	"github.com/diamondburned/gotk4/pkg/pango"
 
@@ -19,24 +22,30 @@ import (
 
 	"btcx/internal/contract"
 	"btcx/internal/model"
+	"btcx/internal/webview"
 )
 
 // thumbnailHeight is the display height of inline/remote images in the reader.
 const thumbnailHeight = 64
 
-// readerPane shows one message: header, remote-content bar, body markup,
-// images and attachments.
+// readerPane shows one message: header, remote-content bar, body (Pango
+// label for plain text, hardened WebKit view for HTML), images and
+// attachments. The web view is created once and reused across messages.
 type readerPane struct {
 	win    *MainWindow
+	root   *gtk.Box // scroll (header + plain body) over the persistent web view
 	scroll *gtk.ScrolledWindow
+	web    *webview.View
 	view   contract.MessageView
 }
 
 func newReaderPane(w *MainWindow) *readerPane {
 	r := &readerPane{win: w}
+	r.root = gtk.NewBox(gtk.OrientationVertical, 0)
 	r.scroll = gtk.NewScrolledWindow()
 	r.scroll.SetPolicy(gtk.PolicyNever, gtk.PolicyAutomatic)
 	r.scroll.SetVExpand(true)
+	r.root.Append(r.scroll)
 	r.clear()
 	return r
 }
@@ -52,15 +61,33 @@ func (r *readerPane) newBox() *gtk.Box {
 	return box
 }
 
-func (r *readerPane) widget() *gtk.ScrolledWindow { return r.scroll }
+func (r *readerPane) widget() *gtk.Box { return r.root }
 
 func (r *readerPane) clear() {
 	r.view = contract.MessageView{}
+	r.hideWeb()
+	r.scroll.SetVExpand(true)
 	box := r.newBox()
 	hint := gtk.NewLabel("Select a message")
 	hint.AddCSSClass("dim-label")
 	box.Append(hint)
 	r.scroll.SetChild(box)
+}
+
+// showWeb displays an HTML document in the persistent hardened web view.
+func (r *readerPane) showWeb(html string) {
+	if r.web == nil {
+		r.web = webview.New(r.win.app.openURL)
+		r.web.Attach(r.root.Object.Native())
+	}
+	r.web.Load(html)
+	r.web.SetVisible(true)
+}
+
+func (r *readerPane) hideWeb() {
+	if r.web != nil {
+		r.web.SetVisible(false)
+	}
 }
 
 // show rebuilds the pane for a message.
@@ -103,9 +130,14 @@ func (r *readerPane) show(view contract.MessageView) {
 	body.SetSelectable(true)
 	body.SetJustify(gtk.JustifyLeft)
 	body.SetMaxWidthChars(100)
+	if view.HTMLBody != "" {
+		body.SetVisible(false) // the web view renders HTML mail below
+	}
 	box.Append(body)
 
-	if images := r.images(view); images != nil {
+	// Inline images render inside the web view for HTML mail; the strip is
+	// the fallback for plain text.
+	if images := r.images(view); images != nil && view.HTMLBody == "" {
 		box.Append(images)
 	}
 	if bar := r.attachments(view); bar != nil {
@@ -113,6 +145,14 @@ func (r *readerPane) show(view contract.MessageView) {
 	}
 	r.scroll.SetChild(box)
 	r.scroll.VAdjustment().SetValue(0)
+
+	if view.HTMLBody != "" {
+		r.showWeb(view.HTMLBody)
+		r.scroll.SetVExpand(false)
+	} else {
+		r.hideWeb()
+		r.scroll.SetVExpand(true)
+	}
 }
 
 func (r *readerPane) meta(name string, list []model.Address) *gtk.Label {
@@ -172,7 +212,7 @@ func (r *readerPane) thumbnail(img contract.InlineImage) gtk.Widgetter {
 	}
 	// gtk.Picture scales the pixbuf at draw time; gotk4 v0.4.1 does not wrap
 	// gdk_pixbuf_scale_simple, so no resampled copy is kept in memory.
-	pic := gtk.NewPictureForPixbuf(pb)
+	pic := gtk.NewPictureForPaintable(gdk.NewTextureForPixbuf(pb)) //nolint:staticcheck // glycin is not a dependency; gdkpixbuf decodes under our size cap
 	pic.SetCanShrink(true)
 	pic.SetContentFit(gtk.ContentFitContain)
 	pic.SetSizeRequest(thumbnailHeight*4, thumbnailHeight)
@@ -201,9 +241,8 @@ func (r *readerPane) showImage(img contract.InlineImage, pb *gdkpixbuf.Pixbuf) {
 	win.SetTransientFor(&r.win.Window)
 	win.SetDefaultSize(800, 600)
 
-	pic := gtk.NewPictureForPixbuf(pb)
+	pic := gtk.NewPictureForPaintable(gdk.NewTextureForPixbuf(pb)) //nolint:staticcheck // glycin is not a dependency; gdkpixbuf decodes under our size cap
 	pic.SetCanShrink(true)
-	pic.SetKeepAspectRatio(true)
 	pic.SetContentFit(gtk.ContentFitContain)
 	win.SetChild(pic)
 	win.Present()
@@ -245,16 +284,14 @@ func (r *readerPane) attachments(view contract.MessageView) gtk.Widgetter {
 
 // saveAttachment asks for a destination and hands it to the controller.
 func (r *readerPane) saveAttachment(view contract.MessageView, a contract.AttachmentInfo) {
-	chooser := gtk.NewFileChooserNative("Save attachment", &r.win.Window,
-		gtk.FileChooserActionSave, "Save", "Cancel")
-	chooser.SetCurrentName(a.Filename)
-	chooser.ConnectResponse(func(response int) {
-		if response != int(gtk.ResponseAccept) {
-			return
-		}
-		file := chooser.File()
-		if file == nil {
-			return
+	dlg := gtk.NewFileDialog()
+	dlg.SetTitle("Save attachment")
+	dlg.SetAcceptLabel("Save")
+	dlg.SetInitialName(a.Filename)
+	dlg.Save(context.Background(), &r.win.Window, func(res gio.AsyncResulter) {
+		file, err := dlg.SaveFinish(res)
+		if err != nil || file == nil {
+			return // the user dismissed the dialog
 		}
 		path := file.Path()
 		if path == "" {
@@ -262,10 +299,9 @@ func (r *readerPane) saveAttachment(view contract.MessageView, a contract.Attach
 			return
 		}
 		if err := r.win.controller.SaveAttachment(view.Account, view.Ref, a.Index, path); err != nil {
-			r.win.app.showDialog("Cannot save attachment", err.Error(), true)
+			r.win.app.showDialog("Cannot save attachment", err.Error())
 		}
 	})
-	chooser.Show()
 }
 
 // maxDecodedDim bounds the largest edge of any decoded mail image.
