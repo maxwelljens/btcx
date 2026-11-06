@@ -1,0 +1,35 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  # Standard set: errcheck, govet, ineffassign, staticcheck, unused.
+  default: standard
+  enable:
+    - gosec # security checks align with AGENTS.md § Security rules
+
+  settings:
+    gosec:
+      excludes:
+        # G104 duplicates errcheck, which is enabled separately.
+        - G104
+
+  exclusions:
+    rules:
+      # Deliberate shell-free argv execution is the security design of the
+      # password/editor commands (AGENTS.md § Security rule 4); gosec cannot
+      # tell argv-exec from shell-exec.
+      - path: internal/config/
+        linters: [gosec]
+        text: "G204"
+      - path: internal/editor/
+        linters: [gosec]
+        text: "G204"
+      # Tests exercise real filesystems and processes by design.
+      - path: _test\.go
+        linters: [gosec]
+      # Production error handling must be explicit; test helpers may ignore
+      # write/close results freely.
+      - path: _test\.go
+        linters: [errcheck]

@@ -76,6 +76,8 @@ in `app` or below. Never import `ui` from a non-UI package.
 
    ```sh
    gofmt -l .            # must print nothing
+   golangci-lint run ./... # must be clean (config: .golangci.yml —
+                          # standard set + gosec, see AGENTS § Coding standards)
    go vet ./...          # must be clean
    go test ./...         # must pass
    go test -race ./...   # must pass (run at least before merging)
@@ -96,8 +98,13 @@ in `app` or below. Never import `ui` from a non-UI package.
 
 ## Coding standards
 
-- Go idiom first: `gofmt`-clean, `go vet`-clean, exported identifiers
-  documented, unexported by default. Follow standard Go review comments.
+- Go idiom first: `gofmt`-clean, `go vet`-clean, **golangci-lint clean**
+  (`.golangci.yml`: the standard linter set plus gosec, with narrowly
+  justified exclusions — errcheck/test-files, G204 on the deliberate
+  shell-free argv executors). A new finding in your change is a defect in
+  your change; suppressions require an inline reason comment.
+- Exported identifiers documented, unexported by default. Follow standard
+  Go review comments.
 - Errors: return wrapped errors with context (`fmt.Errorf("imapx: fetch %s: %w",
   ref, err)`). Never swallow errors silently; never `panic` in library code
   (panics are allowed only for programmer errors during startup wiring).

@@ -27,10 +27,11 @@ imapx, smtpx, script, editor, config} -> model`.
 4. Verify before finishing:
 
 ```sh
-gofmt -l .            # must print nothing
-go vet ./...          # clean
-go test ./...         # pass
-go test -race ./...   # pass (at least before merge)
+gofmt -l .              # must print nothing
+golangci-lint run ./...  # must be clean (.golangci.yml: standard + gosec)
+go vet ./...             # clean
+go test ./...            # pass
+go test -race ./...      # pass (at least before merge)
 ```
 
 When touching parsers (mailparse, render, sanitize), also run the local

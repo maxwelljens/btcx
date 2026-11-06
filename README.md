@@ -92,7 +92,9 @@ The example files are generated from the templates in
 ## Testing
 
 ```sh
-go test ./...          # unit + integration (in-process IMAP/SMTP servers)
+gofmt -l .                    # must print nothing
+golangci-lint run ./...       # standard linters + gosec (config: .golangci.yml)
+go test ./...                 # unit + integration (in-process IMAP/SMTP servers)
 go test -race ./...
 go test ./internal/pipeline/...   # hostile-mail security pipeline
 ```
