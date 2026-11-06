@@ -22,7 +22,7 @@ end
 -- Runs for each newly arrived message.
 function on_new_mail(envelope)
   if envelope.subject:lower():find("newsletter") then
-    btcx.log("debug", "newsletter from " .. tostring(envelope.from.addr))
+    btcx.log("debug", "newsletter from " .. tostring(envelope.from[1] and envelope.from[1].addr or "?"))
   end
 end
 
@@ -43,14 +43,16 @@ end
 
 ## Data passed to hooks
 
-- `envelope` (on_new_mail): `ref` (table: `mailbox`, `uidvalidity`, `uid`),
-  `subject`, `messageid`, `from`, `to`, `cc` (address tables with `name`,
-  `addr`), `date` (unix seconds), `size`, `flags` (table of booleans:
-  `seen`, `answered`, `flagged`, `deleted`, `draft`, `recent`),
-  `hasattachments`.
-- `message` (before_send/after_send): `subject`, `plain`, `html`,
-  `attachments` (array of `{filename, contenttype, size}`), `from`, `to`,
-  `cc`, `bcc` (address tables).
+- `envelope` (on_new_mail): `message_id`, `subject`, `date` (RFC 3339
+  string), `mailbox`, `uid`, `uid_validity`, `size`, `has_attachments`,
+  `from`, `to`, `cc` (arrays of `{name, addr}`), and `flags` (table of
+  booleans: `seen`, `answered`, `flagged`, `deleted`, `draft`, `recent`).
+- `message` (before_send/after_send): `subject`, `plain`, `html`, `from`,
+  `to`, `cc` (address arrays) and `attachments` (array of `{filename,
+  content_type, content_id, size, inline}`).
+
+All fields are informational: mutating the tables does not change the
+message btcx sends.
 
 ## btcx API
 
@@ -82,7 +84,7 @@ end
 
 ```lua
 function on_new_mail(envelope)
-  local from = envelope.from and envelope.from.addr or ""
+  local from = envelope.from[1] and envelope.from[1].addr or ""
   if from:match("@example%.org$") then
     btcx.log("warn", "mail from example.org: " .. envelope.subject)
   end
