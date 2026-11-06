@@ -72,7 +72,8 @@ type DialConfig struct {
 	InsecureSkipVerify bool
 	// CAFile is an optional PEM bundle appended to the system roots.
 	CAFile string
-	// DialTimeout bounds TCP connect and TLS handshake; 0 means 30s.
+	// DialTimeout bounds the whole connect phase: TCP connect, TLS (or
+	// STARTTLS) handshake and LOGIN. 0 means 30s.
 	DialTimeout time.Duration
 }
 
@@ -123,6 +124,10 @@ func Dial(ctx context.Context, cfg DialConfig) (*Client, error) {
 	if timeout <= 0 {
 		timeout = defaultDialTimeout
 	}
+	// Every step up to LOGIN runs under this deadline: a server that accepts
+	// the socket and then stalls must not wedge the serialized client.
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 	tlsConf, err := cfg.tlsConfig()
 	if err != nil {
 		return nil, err
@@ -152,6 +157,8 @@ func Dial(ctx context.Context, cfg DialConfig) (*Client, error) {
 		},
 	}
 
+	// conn is the transport in use, so the handshake deadline can be cleared
+	// once the session is up.
 	var conn net.Conn
 	switch cfg.TLS {
 	case TLSImplicit:
@@ -159,20 +166,27 @@ func Dial(ctx context.Context, cfg DialConfig) (*Client, error) {
 		if err != nil {
 			return nil, fmt.Errorf("imapx: dial %s: %w", addr, err)
 		}
+		// Belt and braces: bound the socket too, for any library path that
+		// blocks without observing ctx.
+		_ = raw.SetDeadline(time.Now().Add(timeout))
 		tlsConn := tls.Client(raw, tlsConf)
 		if err := tlsConn.HandshakeContext(ctx); err != nil {
 			raw.Close()
 			return nil, fmt.Errorf("imapx: tls handshake %s: %w", addr, err)
 		}
+		conn = tlsConn
 		cl.c = imapclient.New(tlsConn, opts)
 	case TLSStartTLS:
 		conn, err = dialer.DialContext(ctx, "tcp", addr)
 		if err != nil {
 			return nil, fmt.Errorf("imapx: dial %s: %w", addr, err)
 		}
+		_ = conn.SetDeadline(time.Now().Add(timeout))
 		var ic *imapclient.Client
 		if err := waitCtx(ctx, func() { conn.Close() }, func() error {
 			var err error
+			// go-imap runs the STARTTLS handshake without a context, so
+			// closing the conn in waitCtx is what interrupts it.
 			ic, err = imapclient.NewStartTLS(conn, opts)
 			return err
 		}); err != nil {
@@ -188,6 +202,8 @@ func Dial(ctx context.Context, cfg DialConfig) (*Client, error) {
 		cl.c.Close()
 		return nil, fmt.Errorf("imapx: login %s as %q: %w", addr, cfg.Username, err)
 	}
+	// The session is bounded per command, not by the dial timeout.
+	_ = conn.SetDeadline(time.Time{})
 	return cl, nil
 }
 

@@ -4,8 +4,12 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"net"
+	"os"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -119,6 +123,28 @@ func TestMailboxes(t *testing.T) {
 	}
 	if !slices.Contains(sent.Attributes, string(imap.MailboxAttrSubscribed)) {
 		t.Errorf("Sent attributes %v lack the subscribed attribute", sent.Attributes)
+	}
+}
+
+func TestMailboxesTooMany(t *testing.T) {
+	ts := newTestServer(t, TLSImplicit)
+	for i := 0; i <= maxMailboxes; i++ {
+		if err := ts.user.Create(fmt.Sprintf("bulk-%05d", i), nil); err != nil {
+			t.Fatalf("create mailbox %d: %v", i, err)
+		}
+	}
+	c := ts.dial(t, nil)
+
+	_, err := c.Mailboxes(context.Background())
+	if !errors.Is(err, errTooManyMailboxes) {
+		t.Fatalf("Mailboxes = %v, want errTooManyMailboxes", err)
+	}
+	if got := err.Error(); !strings.Contains(got, "imapx: too many mailboxes") {
+		t.Errorf("error text = %q", got)
+	}
+	// The connection survives: the command was drained, not abandoned.
+	if _, err := c.Mailboxes(context.Background()); !errors.Is(err, errTooManyMailboxes) {
+		t.Errorf("connection unusable after the cap: %v", err)
 	}
 }
 
@@ -518,5 +544,78 @@ func TestUIDsFrom(t *testing.T) {
 	}
 	if _, err := uidsFrom(imap.SeqSet{{Start: 1, Stop: 2}}); err == nil {
 		t.Error("sequence numbers accepted as UIDs")
+	}
+}
+
+// stallingListener accepts TCP connections and never writes a byte, so both
+// the TLS handshake and the IMAP greeting stall forever.
+func stallingListener(t *testing.T) int {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	var (
+		mu    sync.Mutex
+		conns []net.Conn
+	)
+	t.Cleanup(func() {
+		_ = ln.Close()
+		mu.Lock()
+		defer mu.Unlock()
+		for _, c := range conns {
+			_ = c.Close()
+		}
+	})
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			conns = append(conns, conn)
+			mu.Unlock()
+		}
+	}()
+	return ln.Addr().(*net.TCPAddr).Port
+}
+
+func TestDialStalledServerTimesOut(t *testing.T) {
+	port := stallingListener(t)
+	const timeout = time.Second
+
+	for _, tt := range []struct {
+		name string
+		mode TLSMode
+	}{
+		{"implicit", TLSImplicit},
+		{"starttls", TLSStartTLS},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := DialConfig{
+				Host:               "127.0.0.1",
+				Port:               port,
+				Username:           testUser,
+				Password:           testPass,
+				TLS:                tt.mode,
+				InsecureSkipVerify: true,
+				DialTimeout:        timeout,
+			}
+			start := time.Now()
+			c, err := Dial(context.Background(), cfg)
+			elapsed := time.Since(start)
+			if err == nil {
+				c.Close()
+				t.Fatal("Dial succeeded against a server that never responds")
+			}
+			if elapsed > 5*time.Second {
+				t.Errorf("Dial blocked for %v with a %v dial timeout", elapsed, timeout)
+			}
+			// Either the context or the socket deadline may fire first.
+			if !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, os.ErrDeadlineExceeded) {
+				t.Errorf("err = %v, want a deadline error", err)
+			}
+		})
 	}
 }

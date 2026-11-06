@@ -14,6 +14,13 @@ import (
 	"btcx/internal/model"
 )
 
+// maxMailboxes bounds a LIST response so a hostile server cannot exhaust
+// memory with an unbounded folder list.
+const maxMailboxes = 4096
+
+// errTooManyMailboxes is reported when a LIST response exceeds maxMailboxes.
+var errTooManyMailboxes = errors.New("imapx: too many mailboxes")
+
 // Mailboxes lists all folders with LIST "" "*", preserving server order.
 func (c *Client) Mailboxes(ctx context.Context) ([]model.Mailbox, error) {
 	var out []model.Mailbox
@@ -23,17 +30,20 @@ func (c *Client) Mailboxes(ctx context.Context) ([]model.Mailbox, error) {
 			// Ask for \Sent, \Drafts, ... so the app can find the role folders.
 			opts = &imap.ListOptions{ReturnSpecialUse: true}
 		}
-		list, err := c.c.List("", "*", opts).Collect()
-		if err != nil {
-			return err
-		}
-		out = make([]model.Mailbox, 0, len(list))
-		for _, data := range list {
+		cmd := c.c.List("", "*", opts)
+		for data := cmd.Next(); data != nil; data = cmd.Next() {
+			if len(out) >= maxMailboxes {
+				cmd.Close() // drain so the decoder stays in sync
+				return errTooManyMailboxes
+			}
 			out = append(out, mailboxFromList(data))
 		}
-		return nil
+		return cmd.Close()
 	})
 	if err != nil {
+		if errors.Is(err, errTooManyMailboxes) {
+			return nil, err
+		}
 		return nil, fmt.Errorf("imapx: mailboxes: %w", err)
 	}
 	return out, nil

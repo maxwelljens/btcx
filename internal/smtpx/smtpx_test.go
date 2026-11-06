@@ -539,3 +539,67 @@ func TestInvalidConfig(t *testing.T) {
 		})
 	}
 }
+
+// stallingServer accepts SMTP connections and never sends a greeting, so both
+// the TLS handshake and the SMTP dialogue stall forever.
+func stallingServer(t *testing.T) int {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	var (
+		mu    sync.Mutex
+		conns []net.Conn
+	)
+	t.Cleanup(func() {
+		_ = ln.Close()
+		mu.Lock()
+		defer mu.Unlock()
+		for _, c := range conns {
+			_ = c.Close()
+		}
+	})
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			conns = append(conns, conn)
+			mu.Unlock()
+		}
+	}()
+	return ln.Addr().(*net.TCPAddr).Port
+}
+
+func TestSendStalledServerTimesOut(t *testing.T) {
+	port := stallingServer(t)
+	const timeout = time.Second
+
+	for _, tt := range []struct {
+		name string
+		mode TLSMode
+	}{
+		{"implicit", TLSImplicit},
+		{"starttls", TLSStartTLS},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := baseConfig(port)
+			cfg.TLS = tt.mode
+			cfg.Timeout = timeout
+
+			start := time.Now()
+			err := Send(context.Background(), cfg, []byte(rawMsg), recipients("bob@example.net"))
+			elapsed := time.Since(start)
+
+			if err == nil {
+				t.Fatal("Send succeeded against a server that never responds")
+			}
+			if elapsed > 5*time.Second {
+				t.Errorf("Send blocked for %v with a %v timeout", elapsed, timeout)
+			}
+		})
+	}
+}

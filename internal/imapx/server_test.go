@@ -35,6 +35,7 @@ type testServer struct {
 	mode    TLSMode
 	port    int
 	certPEM []byte
+	user    *imapmemserver.User
 }
 
 func newTestServer(t *testing.T, mode TLSMode) *testServer {
@@ -98,6 +99,7 @@ func newTestServer(t *testing.T, mode TLSMode) *testServer {
 		mode:    mode,
 		port:    ln.Addr().(*net.TCPAddr).Port,
 		certPEM: certPEM,
+		user:    user,
 	}
 }
 

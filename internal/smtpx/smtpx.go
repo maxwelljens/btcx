@@ -60,8 +60,10 @@ type SendConfig struct {
 	// CAFile is an optional PEM bundle appended to the system roots.
 	CAFile string
 
-	From    model.Address // envelope sender (MAIL FROM)
-	Timeout time.Duration // 0 -> 30s per operation
+	From model.Address // envelope sender (MAIL FROM)
+	// Timeout bounds the connect phase (dial, TLS or STARTTLS handshake,
+	// greeting) and every SMTP command; 0 -> 30s.
+	Timeout time.Duration
 }
 
 // ValidationError reports a request rejected locally, before any I/O.
@@ -117,11 +119,21 @@ func Send(ctx context.Context, cfg SendConfig, raw []byte, rcpts []model.Address
 	stop := context.AfterFunc(ctx, func() { conn.Close() })
 	defer stop()
 
-	c, err := newClient(ctx, conn, cfg, tlsCfg)
+	// go-smtp reads the greeting and runs the STARTTLS handshake without a
+	// context, so an expiry closes the socket; the deadline bounds any I/O in
+	// between.
+	connectCtx, cancelConnect := context.WithTimeout(ctx, timeout)
+	defer cancelConnect()
+	_ = conn.SetDeadline(time.Now().Add(timeout))
+	stopConnect := context.AfterFunc(connectCtx, func() { conn.Close() })
+
+	c, err := newClient(connectCtx, conn, cfg, tlsCfg)
+	stopConnect()
 	if err != nil {
 		return err
 	}
 	defer c.Close()
+	_ = conn.SetDeadline(time.Time{})
 	c.CommandTimeout = timeout
 	c.SubmissionTimeout = timeout
 
@@ -130,6 +142,7 @@ func Send(ctx context.Context, cfg SendConfig, raw []byte, rcpts []model.Address
 			return err
 		}
 	}
+	cancelConnect()
 	return transact(ctx, c, cfg, raw, rcpts)
 }
 
