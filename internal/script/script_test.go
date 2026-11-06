@@ -314,7 +314,7 @@ end
 func TestStringFormatMatchesGo(t *testing.T) {
 	cases := []struct{ format, arg, want string }{
 		{"%d", ", 42", fmt.Sprintf("%d", 42)},
-		{"%s", `, "hi"`, fmt.Sprintf("%s", "hi")},
+		{"%s", `, "hi"`, "hi"},
 		{"%q", `, "ab"`, fmt.Sprintf("%q", "ab")},
 		{"%x", ", 255", fmt.Sprintf("%x", 255)},
 		{"%%", "", fmt.Sprintf("%%")},

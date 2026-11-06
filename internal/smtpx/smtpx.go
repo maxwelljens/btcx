@@ -133,7 +133,7 @@ func connect(ctx context.Context, cfg SendConfig) (*smtp.Client, func(), error) 
 	}
 	// Closing the socket is what makes an in-flight command return as soon as
 	// ctx is cancelled or its deadline expires.
-	stop := context.AfterFunc(ctx, func() { conn.Close() })
+	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
 	closer := func() {
 		stop()
 		_ = conn.Close()
@@ -144,7 +144,7 @@ func connect(ctx context.Context, cfg SendConfig) (*smtp.Client, func(), error) 
 	// between.
 	connectCtx, cancelConnect := context.WithTimeout(ctx, timeout)
 	_ = conn.SetDeadline(time.Now().Add(timeout))
-	stopConnect := context.AfterFunc(connectCtx, func() { conn.Close() })
+	stopConnect := context.AfterFunc(connectCtx, func() { _ = conn.Close() })
 	c, err := newClient(connectCtx, conn, cfg, tlsCfg)
 	stopConnect()
 	cancelConnect()
@@ -258,7 +258,7 @@ func authenticate(c *smtp.Client, cfg SendConfig) error {
 	if ok, params := c.Extension("AUTH"); ok {
 		mechs = strings.ToUpper(params)
 	}
-	var a sasl.Client = sasl.NewPlainClient("", cfg.Username, cfg.Password)
+	var a = sasl.NewPlainClient("", cfg.Username, cfg.Password)
 	if !strings.Contains(mechs, sasl.Plain) && strings.Contains(mechs, sasl.Login) {
 		a = sasl.NewLoginClient(cfg.Username, cfg.Password)
 	}
@@ -291,7 +291,7 @@ func transact(ctx context.Context, c *smtp.Client, cfg SendConfig, raw []byte, r
 		return fmt.Errorf("smtpx: data: %w", ctxErr(ctx, err))
 	}
 	if _, err := w.Write(raw); err != nil {
-		w.Close()
+		_ = w.Close()
 		return fmt.Errorf("smtpx: write message: %w", ctxErr(ctx, err))
 	}
 	if err := w.Close(); err != nil {

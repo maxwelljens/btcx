@@ -40,7 +40,7 @@ func (c *Controller) externalEdit(ctx context.Context, draft contract.ComposeDra
 	if err != nil {
 		return draft, fmt.Errorf("app: create draft: %w", err)
 	}
-	defer tmp.Cleanup()
+	defer func() { _ = tmp.Cleanup() }()
 
 	session, err := editor.Start(ctx, template, tmp)
 	if err != nil {

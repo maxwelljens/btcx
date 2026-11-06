@@ -72,7 +72,7 @@ func (c *Client) Watch(ctx context.Context, mailbox string, onNew func(uids []ui
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			c.stopIdle(idle)
+			_ = c.stopIdle(idle) // best-effort: the caller is shutting down
 			return nil
 		case <-c.notify:
 			timer.Stop()

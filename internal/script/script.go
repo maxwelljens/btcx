@@ -182,6 +182,8 @@ func (e *Engine) Load() ([]string, error) {
 	var warns []string
 	for _, name := range names {
 		path := filepath.Join(e.dir, name)
+		// #nosec G304 -- dir is the operator-configured script directory and
+		// name comes from listing that same directory.
 		src, err := os.ReadFile(path)
 		if err != nil {
 			warns = append(warns, e.record(fmt.Sprintf("script %s: %v", name, err)))

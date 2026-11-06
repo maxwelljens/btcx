@@ -135,6 +135,8 @@ func WriteAccount(dir string, a Account) (string, error) {
 		return "", fmt.Errorf("config: encode account %s: %w", a.Name, err)
 	}
 
+	// #nosec G304 -- path is the fixed accounts dir joined to a name already
+	// validated by a.validate(); O_EXCL prevents overwriting.
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if errors.Is(err, os.ErrExist) {
 		return "", fmt.Errorf("config: %s already exists; refusing to overwrite", path)
@@ -155,6 +157,8 @@ func WriteAccount(dir string, a Account) (string, error) {
 // writeNew creates path with mode 0600 and writes body. It reports false and
 // no error when path already exists.
 func writeNew(path string, body []byte) (bool, error) {
+	// #nosec G304 -- path is built by Bootstrap from the config dir and fixed
+	// template names; O_EXCL prevents overwriting.
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if errors.Is(err, os.ErrExist) {
 		return false, nil

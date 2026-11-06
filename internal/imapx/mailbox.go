@@ -33,7 +33,7 @@ func (c *Client) Mailboxes(ctx context.Context) ([]model.Mailbox, error) {
 		cmd := c.c.List("", "*", opts)
 		for data := cmd.Next(); data != nil; data = cmd.Next() {
 			if len(out) >= maxMailboxes {
-				cmd.Close() // drain so the decoder stays in sync
+				_ = cmd.Close() // drain so the decoder stays in sync
 				return errTooManyMailboxes
 			}
 			out = append(out, mailboxFromList(data))
@@ -234,7 +234,7 @@ func (c *Client) fetchEnvelopes(mailbox string, uidValidity uint32, set imap.UID
 	for msg := cmd.Next(); msg != nil; msg = cmd.Next() {
 		buf, err := msg.Collect()
 		if err != nil {
-			cmd.Close()
+			_ = cmd.Close()
 			return nil, fmt.Errorf("collect: %w", err)
 		}
 		if uint32(buf.UID) < minUID {
@@ -262,7 +262,7 @@ func (c *Client) discoverUIDs(startUID uint32) ([]uint32, error) {
 	for msg := cmd.Next(); msg != nil; msg = cmd.Next() {
 		buf, err := msg.Collect()
 		if err != nil {
-			cmd.Close()
+			_ = cmd.Close()
 			return nil, fmt.Errorf("collect: %w", err)
 		}
 		if uint32(buf.UID) < startUID {
@@ -270,7 +270,7 @@ func (c *Client) discoverUIDs(startUID uint32) ([]uint32, error) {
 		}
 		out = append(out, uint32(buf.UID))
 		if len(out) > maxUIDs {
-			cmd.Close()
+			_ = cmd.Close()
 			return nil, fmt.Errorf("imapx: mailbox has more than %d messages; refusing to window it", maxUIDs)
 		}
 	}
@@ -315,16 +315,16 @@ func (c *Client) RawMessage(ctx context.Context, mailbox string, uid uint32) ([]
 					continue
 				}
 				if data.Literal.Size() > c.maxMessageBytes {
-					cmd.Close()
+					_ = cmd.Close()
 					return ErrMessageTooLarge
 				}
 				b, err := io.ReadAll(io.LimitReader(data.Literal, c.maxMessageBytes+1))
 				if err != nil {
-					cmd.Close()
+					_ = cmd.Close()
 					return fmt.Errorf("read body: %w", err)
 				}
 				if int64(len(b)) > c.maxMessageBytes {
-					cmd.Close()
+					_ = cmd.Close()
 					return ErrMessageTooLarge
 				}
 				raw = b
@@ -417,7 +417,7 @@ func (c *Client) Append(ctx context.Context, mailbox string, raw []byte, flags m
 	err := c.do(ctx, func() error {
 		cmd := c.c.Append(mailbox, int64(len(raw)), &imap.AppendOptions{Flags: flagsToIMAP(flags)})
 		if _, err := cmd.Write(raw); err != nil {
-			cmd.Close()
+			_ = cmd.Close()
 			return fmt.Errorf("write literal: %w", err)
 		}
 		if err := cmd.Close(); err != nil {

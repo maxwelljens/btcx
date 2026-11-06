@@ -309,7 +309,7 @@ func (c *Controller) checkIMAP(ctx context.Context, a config.Account, password s
 	if err != nil {
 		return contract.ServerCheck{Detail: err.Error()}
 	}
-	defer cl.Close()
+	defer func() { _ = cl.Close() }()
 
 	boxes, err := cl.Mailboxes(ctx)
 	if err != nil {

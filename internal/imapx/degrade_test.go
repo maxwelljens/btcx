@@ -114,8 +114,8 @@ func (s *snipeConn) feed(b []byte) {
 		}
 		if s.observe != nil && s.observe(line) {
 			s.killed = true
-			_, _ = s.Conn.Write([]byte("* BYE Internal error occurred. Refer to server log for more information.\r\n"))
-			_ = s.Conn.Close()
+			_, _ = s.Write([]byte("* BYE Internal error occurred. Refer to server log for more information.\r\n"))
+			_ = s.Close()
 			return
 		}
 		s.out.WriteString(line + "\r\n")
@@ -187,7 +187,7 @@ func TestEnvelopesSurvivesServerByeOnBodyStructure(t *testing.T) {
 		}
 		// Kill the bulk attempt and the 11:20 chunk; let healthy chunks
 		// and all degraded (no-BODY) fetches through.
-		return !(strings.Contains(line, "1:10") || strings.Contains(line, "21:30"))
+		return !strings.Contains(line, "1:10") && !strings.Contains(line, "21:30")
 	})
 
 	envs, err := cl.Envelopes(context.Background(), "INBOX", 1, 30)

@@ -413,7 +413,7 @@ func (c *Controller) clientFor(ctx context.Context, st *accountState) (MailClien
 	c.mu.Lock()
 	if c.closed {
 		c.mu.Unlock()
-		cl.Close()
+		_ = cl.Close()
 		return nil, fmt.Errorf("connect %s: %w", st.cfg.Name, context.Canceled)
 	}
 	st.client = cl

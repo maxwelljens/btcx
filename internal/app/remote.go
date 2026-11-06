@@ -215,7 +215,7 @@ func (c *Controller) fetchImage(ctx context.Context, rawURL string) contract.Inl
 		img.Failed = true
 		return img
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		img.Failed = true
 		return img

@@ -213,7 +213,7 @@ func (c *Client) connect(ctx context.Context) error {
 		_ = raw.SetDeadline(time.Now().Add(timeout))
 		tlsConn := tls.Client(raw, tlsConf)
 		if err := tlsConn.HandshakeContext(ctx); err != nil {
-			raw.Close()
+			_ = raw.Close()
 			return fmt.Errorf("imapx: tls handshake %s: %w", addr, err)
 		}
 		conn = tlsConn
@@ -225,23 +225,23 @@ func (c *Client) connect(ctx context.Context) error {
 		}
 		_ = conn.SetDeadline(time.Now().Add(timeout))
 		var ic *imapclient.Client
-		if err := waitCtx(ctx, func() { conn.Close() }, func() error {
+		if err := waitCtx(ctx, func() { _ = conn.Close() }, func() error {
 			var err error
 			// go-imap runs the STARTTLS handshake without a context, so
 			// closing the conn in waitCtx is what interrupts it.
 			ic, err = imapclient.NewStartTLS(conn, opts)
 			return err
 		}); err != nil {
-			conn.Close()
+			_ = conn.Close()
 			return fmt.Errorf("imapx: starttls %s: %w", addr, err)
 		}
 		c.c = ic
 	}
 
-	if err := waitCtx(ctx, func() { c.c.Close() }, func() error {
+	if err := waitCtx(ctx, func() { _ = c.c.Close() }, func() error {
 		return c.c.Login(cfg.Username, cfg.Password).Wait()
 	}); err != nil {
-		c.c.Close()
+		_ = c.c.Close()
 		return fmt.Errorf("imapx: login %s as %q: %w", addr, cfg.Username, err)
 	}
 	// The session is bounded per command, not by the dial timeout.
@@ -335,7 +335,7 @@ func (c *Client) do(ctx context.Context, fn func() error) error {
 		return ErrBusy
 	}
 	defer c.mu.Unlock()
-	return waitCtx(ctx, func() { c.c.Close() }, fn)
+	return waitCtx(ctx, func() { _ = c.c.Close() }, fn)
 }
 
 // waitCtx runs fn in a goroutine and waits for it, aborting via abort when ctx
@@ -351,7 +351,7 @@ func waitCtx(ctx context.Context, abort func(), fn func() error) error {
 		return err
 	case <-ctx.Done():
 		abort()
-		<-done
+		<-done //nolint:errcheck // the aborted command's error is moot: ctx.Err() wins
 		return ctx.Err()
 	}
 }

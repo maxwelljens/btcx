@@ -68,6 +68,8 @@ func NewDraft(suggestedBase, initialContent string) (*Draft, error) {
 		return nil, fmt.Errorf("editor: create draft dir: %w", err)
 	}
 	path := filepath.Join(dir, draftName(suggestedBase))
+	// #nosec G304 -- dir is the private temp dir NewDraft just created and the
+	// name is reduced to a base name by draftName.
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err == nil {
 		if initialContent != "" {
