@@ -46,6 +46,11 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Security
 
+- Message lists now show the newest messages: `Envelopes` fetched ascending
+  from UID 1 and stopped at the page size, so the UI displayed the oldest
+  messages in the mailbox ("latest mail is from July 2025" while mail
+  exists up to today). It now discovers the mailbox UIDs and returns the
+  newest window; search and new-mail merges use a new exact-UID fetch.
 - Robustness against broken servers: a server that crashes mid-fetch while
   generating one message's `BODYSTRUCTURE` (observed with Dovecot answering
   `* BYE Internal error occurred`) no longer bricks the mailbox — envelopes
