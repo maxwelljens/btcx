@@ -34,6 +34,13 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
   with remote-content opt-in bar, inline-image strip, attachment saving,
   compose window with external-editor sessions, keyboard shortcuts and
   theme support (`internal/ui`, `internal/app`, `cmd/btcx`).
+- Guided first-run experience: on a fresh launch btcx generates commented
+  example configuration (general settings, a full account-setup walkthrough
+  with real provider settings and password guidance, and an example Lua
+  script) and opens a setup wizard with settings detection, live IMAP/SMTP
+  connection testing, one-click account creation and a hand-editing path;
+  a welcome empty state keeps the app usable without configuration.
+  `Reload` picks up hand-edited account files without a restart.
 - End-to-end security pipeline test suite (hostile mail through
   parse → sanitize → render).
 

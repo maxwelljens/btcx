@@ -7,6 +7,10 @@ bulk.
 
 ## Highlights
 
+- **Guided first run**: launch with no configuration and btcx writes
+  commented example config files and opens a setup wizard — detect your
+  servers, test the connection, create the account, done. Hand-editing the
+  files works too, always with an example at hand.
 - **Modern UI** (GTK4 via gotk4): folder sidebar, fast message list, reader
   pane with safe HTML rendering, compose window.
 - **Compose and read** plain-text and HTML mail with attachments and inline
@@ -43,15 +47,39 @@ go build -ldflags "-X btcx/internal/buildinfo.version=v0.1.0 \
   -o btcx ./cmd/btcx
 ```
 
+## First run
+
+Launch `btcx` with no configuration and:
+
+1. btcx creates `~/.config/btcx/` with a fully commented `config.toml`,
+   `accounts/example.toml.example` (a complete account-setup walkthrough
+   including real Gmail/Outlook/Fastmail/Yahoo settings and both password
+   options) and `scripts/example.lua.example`.
+2. A setup window walks you through creating an account: your address,
+   incoming (IMAP) and outgoing (SMTP) servers — with a "Detect settings"
+   guess based on your domain — and a password (stored in the file, or
+   supplied by a command such as `pass`).
+3. "Test connection" verifies IMAP login and SMTP submission live before
+   anything is written; "Create account" writes `~/.config/btcx/accounts/
+   <name>.toml` (mode 600) and connects.
+
+Prefer editing files? Everything the wizard writes is plain commented
+TOML; open the config folder from the welcome screen, copy the example,
+edit, and press "Reload configuration".
+
 ## Configuration
 
-Two TOML files under `~/.config/btcx/` (see `docs/*.example`):
+Everything lives under `~/.config/btcx/` (or `$XDG_CONFIG_HOME/btcx`):
 
-- `config.toml` — theme, external editor, watching, remote-content policy.
+- `config.toml` — theme, external editor, watching, remote-content policy,
+  scripting, logging.
 - `accounts/<name>.toml` — IMAP/SMTP servers, credentials, folders,
   signature. Passwords come from the file (keep it `chmod 600`) or from a
   `password_command` such as `pass show mail/example.org` — btcx runs it
   without a shell.
+
+The example files are generated from the templates in
+`internal/config/templates/` on first launch and never overwritten.
 
 ## Testing
 
