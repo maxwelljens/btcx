@@ -193,6 +193,20 @@ func (r *readerPane) remoteBar(view contract.MessageView) gtk.Widgetter {
 	text.SetHExpand(true)
 	bar.Append(text)
 
+	if domain := senderDomain(view.From); domain != "" {
+		trust := gtk.NewButtonWithLabel("Always from " + domain)
+		trust.SetTooltipText("Remember this domain: always load remote images in messages from it")
+		trust.ConnectClicked(func() {
+			if err := r.win.controller.TrustImageDomain(domain); err != nil {
+				r.win.app.showDialog("Cannot remember domain", err.Error())
+				return
+			}
+			// The re-delivered view is trusted, so the bar disappears.
+			r.win.controller.LoadRemoteContent(view.Account, view.Ref)
+		})
+		bar.Append(trust)
+	}
+
 	button := gtk.NewButtonWithLabel("Load remote content")
 	button.AddCSSClass("suggested-action")
 	button.ConnectClicked(func() {
@@ -200,6 +214,18 @@ func (r *readerPane) remoteBar(view contract.MessageView) gtk.Widgetter {
 	})
 	bar.Append(button)
 	return bar
+}
+
+// senderDomain is the trustable domain of a message's senders: the part after
+// the last @ of the first From address that has one, lower-cased; "" when no
+// address carries a domain.
+func senderDomain(addrs []model.Address) string {
+	for _, a := range addrs {
+		if at := strings.LastIndexByte(a.Addr, '@'); at >= 0 {
+			return strings.ToLower(a.Addr[at+1:])
+		}
+	}
+	return ""
 }
 
 // images builds the thumbnail strip for remote/inline images.
