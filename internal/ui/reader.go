@@ -45,6 +45,15 @@ func newReaderPane(w *MainWindow) *readerPane {
 	r.scroll = gtk.NewScrolledWindow()
 	r.scroll.SetPolicy(gtk.PolicyNever, gtk.PolicyAutomatic)
 	r.scroll.SetVExpand(true)
+	// GTK4's default collapses a non-expanded scrolled window to its
+	// minimum height: when the web view claims the room (HTML messages),
+	// the metadata header above it would shrink to one line plus a
+	// scrollbar — hiding everything but the subject (including the
+	// remote-content bar). Propagate the child's natural height so the
+	// whole header shows, clamped so a huge To/Cc list can never squeeze
+	// the message body out of view.
+	r.scroll.SetPropagateNaturalHeight(true)
+	r.scroll.SetMaxContentHeight(360)
 	r.root.Append(r.scroll)
 	r.clear()
 	return r

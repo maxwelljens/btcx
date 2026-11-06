@@ -122,6 +122,18 @@ func TestMainWindowWidgets(t *testing.T) {
 		t.Fatal("window parts are missing")
 	}
 
+	// The metadata header must not collapse next to the web view: natural
+	// height propagation keeps subject/from/to and the remote-content bar
+	// visible without scrolling, while the clamp bounds huge headers so the
+	// message body keeps its room. (Regression: only the subject was
+	// visible and everything else needed scrolling.)
+	if !w.reader.scroll.PropagateNaturalHeight() {
+		t.Error("reader header would collapse: PropagateNaturalHeight is false")
+	}
+	if h := w.reader.scroll.MaxContentHeight(); h <= 0 {
+		t.Error("reader header has no height clamp; a huge header could squeeze out the body")
+	}
+
 	w.setFolders("work", []contract.FolderInfo{
 		{Name: "INBOX", Unread: 2},
 		{Name: "Sent", Role: "sent"},
