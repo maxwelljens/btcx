@@ -16,11 +16,19 @@ import (
 	"btcx/internal/model"
 )
 
+// composeController is the slice of the controller a compose window drives.
+type composeController interface {
+	SaveDraft(draft contract.ComposeDraft)
+	Send(draft contract.ComposeDraft) contract.SendID
+	StartExternalEdit(draft contract.ComposeDraft) contract.EditRequestID
+}
+
 // ComposeWindow edits one outgoing message.
 type ComposeWindow struct {
 	*gtk.ApplicationWindow
 
 	app *app
+	ctl composeController
 
 	to      *gtk.Entry
 	cc      *gtk.Entry
@@ -41,6 +49,7 @@ func newComposeWindow(w *MainWindow, draft contract.ComposeDraft) *ComposeWindow
 	c := &ComposeWindow{
 		ApplicationWindow: gtk.NewApplicationWindow(w.app.gtkApp),
 		app:               w.app,
+		ctl:               w.app.controller,
 		draft:             draft,
 	}
 	c.SetTransientFor(&w.Window)
@@ -86,7 +95,7 @@ func (c *ComposeWindow) buildHeader() *gtk.HeaderBar {
 	save.SetTooltipText("Save this message in the Drafts folder")
 	save.ConnectClicked(func() {
 		if draft, ok := c.collect(); ok {
-			c.app.controller.SaveDraft(draft)
+			c.ctl.SaveDraft(draft)
 			c.app.setStatusOnMain("Draft saved")
 		}
 	})
@@ -312,7 +321,7 @@ func (c *ComposeWindow) send() {
 	if !ok {
 		return
 	}
-	c.app.trackSend(c.app.controller.Send(draft), c)
+	c.app.trackSend(c.ctl.Send(draft), c)
 }
 
 func (c *ComposeWindow) externalEdit() {
@@ -320,7 +329,7 @@ func (c *ComposeWindow) externalEdit() {
 	if !ok {
 		return
 	}
-	id := c.app.controller.StartExternalEdit(draft)
+	id := c.ctl.StartExternalEdit(draft)
 	c.app.trackEdit(id, c)
 	c.setStatus("Waiting for editor…")
 }

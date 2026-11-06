@@ -1,19 +1,26 @@
 package ui
 
 import (
-	"fmt"
+	"errors"
 	"strings"
 
 	"github.com/diamondburned/gotk4/pkg/gtk/v4"
 
 	"btcx/internal/contract"
-	"btcx/internal/model"
 )
 
 const (
 	setupWidth  = 600
 	setupHeight = 720
 )
+
+// setupController is the slice of the controller the setup wizard drives.
+type setupController interface {
+	VerifyAccount(spec contract.AccountSpec)
+	CreateAccount(spec contract.AccountSpec) (string, error)
+	Reload()
+	Accounts() []contract.AccountInfo
+}
 
 // SetupWindow walks the user through creating an account without touching a
 // file: it collects an AccountSpec and hands it to the controller, which owns
@@ -22,6 +29,7 @@ type SetupWindow struct {
 	*gtk.ApplicationWindow
 
 	app *app
+	ctl setupController
 
 	display  *gtk.Entry
 	email    *gtk.Entry
@@ -56,6 +64,7 @@ func newSetupWindow(a *app, w *MainWindow) *SetupWindow {
 	s := &SetupWindow{
 		ApplicationWindow: gtk.NewApplicationWindow(a.gtkApp),
 		app:               a,
+		ctl:               a.controller,
 	}
 	s.SetTitle("Set up an e-mail account")
 	s.SetDefaultSize(setupWidth, setupHeight)
@@ -274,7 +283,7 @@ func (s *SetupWindow) close() {
 // direct consequence of it, until the user edits them.
 func (s *SetupWindow) emailChanged() {
 	email := strings.TrimSpace(s.email.Text())
-	if _, err := parseEmail(email); err != nil {
+	if err := contract.ValidateAccountEmail(email); err != nil {
 		s.email.SetIconFromIconName(gtk.EntryIconPrimary, "dialog-error-symbolic")
 		s.email.SetIconTooltipText(gtk.EntryIconPrimary, err.Error())
 	} else {
@@ -286,7 +295,7 @@ func (s *SetupWindow) emailChanged() {
 		s.autoUser = email
 	}
 	if s.name.Text() == "" || s.name.Text() == s.derivedName {
-		s.derivedName = deriveAccountName(email)
+		s.derivedName = contract.DeriveAccountName(email)
 		s.name.SetText(s.derivedName)
 	}
 }
@@ -295,7 +304,7 @@ func (s *SetupWindow) emailChanged() {
 // tests the guess.
 func (s *SetupWindow) detect() {
 	email := strings.TrimSpace(s.email.Text())
-	if _, err := parseEmail(email); err != nil {
+	if err := contract.ValidateAccountEmail(email); err != nil {
 		s.showFormError(err)
 		return
 	}
@@ -332,15 +341,12 @@ func (s *SetupWindow) collect() (contract.AccountSpec, error) {
 		},
 		Signature: s.signatureText(),
 	}
-	if spec.Name == "" {
-		spec.Name = deriveAccountName(spec.Email)
-	}
 	if s.passStack.VisibleChildName() == "command" {
 		spec.PasswordCommand = strings.TrimSpace(s.passCommand.Text())
 	} else {
 		spec.Password = s.password.Text()
 	}
-	if err := validateSpec(spec); err != nil {
+	if err := spec.Normalize(); err != nil {
 		return spec, err
 	}
 	return spec, nil
@@ -367,7 +373,7 @@ func (s *SetupWindow) test() {
 	s.smtpOK.RemoveCSSClass("success")
 	s.smtpOK.RemoveCSSClass("error")
 	s.setTesting(true)
-	s.app.controller.VerifyAccount(spec)
+	s.ctl.VerifyAccount(spec)
 }
 
 // showVerify paints the outcome of VerifyAccount.
@@ -395,7 +401,7 @@ func (s *SetupWindow) create() {
 		s.showFormError(err)
 		return
 	}
-	if _, err := s.app.controller.CreateAccount(spec); err != nil {
+	if _, err := s.ctl.CreateAccount(spec); err != nil {
 		s.showError("Cannot create account", err.Error())
 		return
 	}
@@ -405,8 +411,8 @@ func (s *SetupWindow) create() {
 	}
 	s.close()
 	if s.app.win != nil {
-		s.app.controller.Reload()
-		s.app.win.setAccounts(s.app.controller.Accounts())
+		s.ctl.Reload()
+		s.app.win.setAccounts(s.ctl.Accounts())
 		s.app.win.setStatus("Account "+name+" created", false)
 	}
 }
@@ -422,6 +428,36 @@ func (s *SetupWindow) handEdit() {
 func (s *SetupWindow) showFormError(err error) {
 	s.status.AddCSSClass("error")
 	s.status.SetText(err.Error())
+	for _, e := range []*gtk.Entry{s.email, s.name, s.imapHost, s.imapUser, s.smtpHost, s.smtpUser} {
+		e.SetIconFromIconName(gtk.EntryIconPrimary, "")
+	}
+	var field *contract.FieldError
+	if errors.As(err, &field) {
+		if e := s.fieldEntry(field.Field); e != nil {
+			e.SetIconFromIconName(gtk.EntryIconPrimary, "dialog-error-symbolic")
+			e.SetIconTooltipText(gtk.EntryIconPrimary, field.Message)
+		}
+	}
+}
+
+// fieldEntry maps a Normalize field path to the entry that collects it, so a
+// validation failure can point at the offending field.
+func (s *SetupWindow) fieldEntry(field string) *gtk.Entry {
+	switch field {
+	case "email":
+		return s.email
+	case "name":
+		return s.name
+	case "imap.host":
+		return s.imapHost
+	case "imap.username":
+		return s.imapUser
+	case "smtp.host":
+		return s.smtpHost
+	case "smtp.username":
+		return s.smtpUser
+	}
+	return nil
 }
 
 func (s *SetupWindow) showError(title, message string) {
@@ -503,44 +539,6 @@ func showCheck(l *gtk.Label, name string, c contract.ServerCheck) {
 	l.SetText("✗ " + name + ": " + detail)
 }
 
-// parseEmail returns the one bare address in s. The application writes it as
-// the account's From address, so display names are not accepted here.
-func parseEmail(s string) (model.Address, error) {
-	s = strings.TrimSpace(s)
-	list, err := model.ParseAddressList(s)
-	if err != nil {
-		return model.Address{}, fmt.Errorf("not a valid e-mail address: %w", err)
-	}
-	switch {
-	case len(list) == 0:
-		return model.Address{}, fmt.Errorf("enter your e-mail address")
-	case len(list) > 1:
-		return model.Address{}, fmt.Errorf("enter one e-mail address, not a list")
-	case list[0].Addr == "" || !strings.Contains(list[0].Addr, "@"):
-		return model.Address{}, fmt.Errorf("not a valid e-mail address")
-	case list[0].Addr != s:
-		return model.Address{}, fmt.Errorf("enter the bare e-mail address, without a display name")
-	}
-	return list[0], nil
-}
-
-// deriveAccountName mirrors the application's derivation of an account file
-// stem from the address domain: only [a-z0-9_-] survives.
-func deriveAccountName(email string) string {
-	_, domain, ok := strings.Cut(strings.TrimSpace(email), "@")
-	if !ok {
-		return ""
-	}
-	var b strings.Builder
-	for _, r := range strings.ToLower(domain) {
-		switch {
-		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '-', r == '_':
-			b.WriteRune(r)
-		}
-	}
-	return strings.TrimLeft(b.String(), "-_")
-}
-
 // guessServers is the documented heuristic behind "Detect settings": IMAP on
 // imap.<domain>:993 TLS, SMTP on smtp.<domain>:587 STARTTLS.
 func guessServers(email string) (contract.ServerSpec, contract.ServerSpec) {
@@ -555,44 +553,6 @@ func guessServers(email string) (contract.ServerSpec, contract.ServerSpec) {
 	}, contract.ServerSpec{
 		Host: "smtp." + domain, Port: 587, Username: email, TLS: "starttls",
 	}
-}
-
-// validateSpec covers the form's own rules: a single address, two usable
-// servers, and exactly one credential source.
-func validateSpec(spec contract.AccountSpec) error {
-	addr, err := parseEmail(spec.Email)
-	if err != nil {
-		return err
-	}
-	if strings.ContainsAny(addr.Addr, "\r\n") {
-		return fmt.Errorf("e-mail address must not contain line breaks")
-	}
-	if err := validateServer("incoming", spec.IMAP); err != nil {
-		return err
-	}
-	if err := validateServer("outgoing", spec.SMTP); err != nil {
-		return err
-	}
-	if (spec.Password == "") == (spec.PasswordCommand == "") {
-		return fmt.Errorf("enter either a password or a password command")
-	}
-	return nil
-}
-
-func validateServer(kind string, s contract.ServerSpec) error {
-	if strings.TrimSpace(s.Host) == "" {
-		return fmt.Errorf("%s server host is required", kind)
-	}
-	if s.Port < 0 || s.Port > 65535 {
-		return fmt.Errorf("%s server port must be between 1 and 65535", kind)
-	}
-	if s.TLS != "tls" && s.TLS != "starttls" {
-		return fmt.Errorf("%s server security must be TLS or STARTTLS", kind)
-	}
-	if strings.ContainsAny(s.Host+s.Username, "\r\n") {
-		return fmt.Errorf("%s server details must not contain line breaks", kind)
-	}
-	return nil
 }
 
 // generatedFilesText is the first-run banner: what btcx created this launch.

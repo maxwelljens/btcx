@@ -2,78 +2,24 @@ package app
 
 import (
 	"encoding/base64"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"btcx/internal/model"
+	"btcx/internal/remotecontent"
 )
 
 const pngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
 
-// allowLoopbackHTTP swaps the production (public-address-only) fetcher for a
-// plain client so tests can use loopback httptest servers. The refusal
-// behaviour itself is covered by TestNewHTTPClientRefusesLoopback.
+// allowLoopbackHTTP swaps the SSRF-safe client for a plain one so tests can
+// use loopback httptest servers. The refusal itself is covered by
+// TestNewHTTPClientRefusesLoopback in internal/remotecontent.
 func allowLoopbackHTTP(c *Controller) {
-	c.http = &http.Client{Timeout: remoteTimeout}
-}
-
-func TestIsPublicIP(t *testing.T) {
-	public := []string{
-		"8.8.8.8", "1.1.1.1", "2001:4860:4860::8888", "2606:4700::1111",
-		// just outside the refused special-purpose blocks
-		"100.63.255.255", "100.128.0.0", "198.17.255.255", "198.20.0.0",
-		"192.0.1.1", "223.255.255.255", "64:ff9b:0:1::1",
-	}
-	private := []string{
-		"127.0.0.1", "127.1.2.3", "::1",
-		"10.0.0.1", "172.16.0.1", "172.31.255.255", "192.168.1.1",
-		"169.254.169.254", "fe80::1",
-		"0.0.0.0", "0.1.2.3", "::",
-		"fc00::1", "fd12:3456::1",
-		"224.0.0.1", "ff02::1",
-		// special-purpose blocks hostile mail must not reach
-		"100.64.0.1", "100.127.255.255", // CGNAT
-		"198.18.0.1", "198.19.255.255", // benchmarking
-		"192.0.0.8", "192.0.0.255", // IETF protocol assignments
-		"240.0.0.1", "255.255.255.255", // reserved
-		"64:ff9b::a00:1", "64:ff9b::1.2.3.4", // NAT64
-	}
-	for _, s := range public {
-		if !isPublicIP(net.ParseIP(s)) {
-			t.Errorf("isPublicIP(%s) = false, want true", s)
-		}
-	}
-	for _, s := range private {
-		if isPublicIP(net.ParseIP(s)) {
-			t.Errorf("isPublicIP(%s) = true, want false", s)
-		}
-	}
-	if isPublicIP(nil) {
-		t.Error("isPublicIP(nil) = true, want false")
-	}
-}
-
-func TestNewHTTPClientRefusesLoopback(t *testing.T) {
-	httpSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "image/png")
-		_, _ = w.Write(mustBase64(t, pngBase64))
-	}))
-	defer httpSrv.Close()
-
-	// The production fetcher must refuse loopback even though the server
-	// would happily answer.
-	resp, err := newHTTPClient().Get(httpSrv.URL + "/x.png")
-	if err == nil {
-		resp.Body.Close()
-		t.Fatal("production fetcher reached a loopback server; SSRF filter failed")
-	}
-	if !strings.Contains(err.Error(), "no public address") && !strings.Contains(err.Error(), "refused") {
-		t.Errorf("unexpected error shape: %v", err)
-	}
+	c.remote.Client = &http.Client{Timeout: 5 * time.Second}
 }
 
 func TestLoadRemoteContentFetchesBoundedImages(t *testing.T) {
@@ -133,8 +79,8 @@ func TestLoadRemoteContentFetchesBoundedImages(t *testing.T) {
 	}
 
 	images := view.RemoteImages
-	if len(images) != maxRemoteImages+1 { // ten remote plus the cid part
-		t.Fatalf("images = %d, want %d", len(images), maxRemoteImages+1)
+	if len(images) != remotecontent.MaxImages+1 { // ten remote plus the cid part
+		t.Fatalf("images = %d, want %d", len(images), remotecontent.MaxImages+1)
 	}
 	if images[0].URL != httpSrv.URL+"/ok.png" || images[0].Failed || len(images[0].Data) == 0 {
 		t.Errorf("first image = %+v, want a fetched png", images[0])
@@ -154,8 +100,8 @@ func TestLoadRemoteContentFetchesBoundedImages(t *testing.T) {
 	mu.Lock()
 	got := requests
 	mu.Unlock()
-	if got != maxRemoteImages {
-		t.Errorf("requests = %d, want the cap %d", got, maxRemoteImages)
+	if got != remotecontent.MaxImages {
+		t.Errorf("requests = %d, want the cap %d", got, remotecontent.MaxImages)
 	}
 }
 

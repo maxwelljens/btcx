@@ -3,8 +3,6 @@ package ui
 import (
 	"strings"
 	"testing"
-
-	"btcx/internal/contract"
 )
 
 func TestGuessServers(t *testing.T) {
@@ -18,63 +16,6 @@ func TestGuessServers(t *testing.T) {
 
 	if imap, smtp := guessServers("not-an-address"); imap.Host != "" || smtp.Host != "" {
 		t.Errorf("guessed from an address without @: %+v %+v", imap, smtp)
-	}
-}
-
-func TestDeriveAccountName(t *testing.T) {
-	cases := map[string]string{
-		"jane@example.org":       "exampleorg",
-		"JANE@EXAMPLE.ORG":       "exampleorg",
-		"jane@sub.example.co.uk": "subexamplecouk",
-		"jane@exa mple!.org":     "exampleorg",
-		"jane@":                  "",
-		"no-at-sign":             "",
-	}
-	for email, want := range cases {
-		if got := deriveAccountName(email); got != want {
-			t.Errorf("deriveAccountName(%q) = %q, want %q", email, got, want)
-		}
-	}
-}
-
-func TestValidateSpec(t *testing.T) {
-	valid := contract.AccountSpec{
-		Email:    "jane@example.org",
-		IMAP:     contract.ServerSpec{Host: "imap.example.org", Port: 993, Username: "jane@example.org", TLS: "tls"},
-		SMTP:     contract.ServerSpec{Host: "smtp.example.org", Port: 587, Username: "jane@example.org", TLS: "starttls"},
-		Password: "secret",
-	}
-
-	cases := []struct {
-		name   string
-		mutate func(*contract.AccountSpec)
-		want   string
-	}{
-		{"valid", func(*contract.AccountSpec) {}, ""},
-		{"empty email", func(s *contract.AccountSpec) { s.Email = " " }, "enter your e-mail address"},
-		{"bad email", func(s *contract.AccountSpec) { s.Email = "jane@" }, "valid e-mail"},
-		{"two addresses", func(s *contract.AccountSpec) { s.Email = "a@x.org, b@y.org" }, "one e-mail"},
-		{"empty host", func(s *contract.AccountSpec) { s.IMAP.Host = "" }, "incoming server host"},
-		{"bad TLS", func(s *contract.AccountSpec) { s.SMTP.TLS = "plain" }, "server security"},
-		{"bad port", func(s *contract.AccountSpec) { s.IMAP.Port = 70000 }, "incoming server port"},
-		{"display name in email", func(s *contract.AccountSpec) { s.Email = "Jane <jane@example.org>" }, "bare e-mail"},
-		{"both credentials", func(s *contract.AccountSpec) { s.PasswordCommand = "pass show x" }, "either a password or a password command"},
-		{"no credentials", func(s *contract.AccountSpec) { s.Password = "" }, "either a password or a password command"},
-		{"header injection", func(s *contract.AccountSpec) { s.IMAP.Host = "imap.example.org\r\nX: y" }, "line breaks"},
-	}
-	for _, c := range cases {
-		spec := valid
-		c.mutate(&spec)
-		err := validateSpec(spec)
-		if c.want == "" {
-			if err != nil {
-				t.Errorf("%s: unexpected error %v", c.name, err)
-			}
-			continue
-		}
-		if err == nil || !strings.Contains(err.Error(), c.want) {
-			t.Errorf("%s: error = %v, want containing %q", c.name, err, c.want)
-		}
 	}
 }
 

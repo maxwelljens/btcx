@@ -20,7 +20,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"sync"
 	"time"
 
@@ -28,6 +27,7 @@ import (
 	"btcx/internal/config"
 	"btcx/internal/contract"
 	"btcx/internal/model"
+	"btcx/internal/remotecontent"
 	"btcx/internal/script"
 )
 
@@ -112,7 +112,8 @@ type Controller struct {
 	events contract.Events
 	log    *slog.Logger
 	conn   Connector
-	http   *http.Client
+	remote *remotecontent.Fetcher
+	trust  *remotecontent.Trust
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -135,17 +136,14 @@ type Controller struct {
 	active   string
 	scripts  *script.Engine
 	// cache holds parsed messages; it has its own lock.
-	cache *messageCache
-	// trustedImages holds sender domains whose remote images always load
-	// (persisted in remote_images.toml).
-	trustedImages map[string]bool
-	nextEdit      contract.EditRequestID
-	nextSend      contract.SendID
-	lastErr       string
-	lastErrAt     time.Time
-	started       bool
-	startErr      error
-	closed        bool
+	cache     *messageCache
+	nextEdit  contract.EditRequestID
+	nextSend  contract.SendID
+	lastErr   string
+	lastErrAt time.Time
+	started   bool
+	startErr  error
+	closed    bool
 
 	wg           sync.WaitGroup
 	shutdownOnce sync.Once
@@ -203,7 +201,7 @@ func New(cfg *config.Config, events contract.Events, logger *slog.Logger, connec
 		events:    events,
 		log:       logger,
 		conn:      connector,
-		http:      newHTTPClient(),
+		remote:    remotecontent.NewFetcher(),
 		ctx:       ctx,
 		cancel:    cancel,
 		runCtx:    runCtx,
@@ -220,14 +218,11 @@ func New(cfg *config.Config, events contract.Events, logger *slog.Logger, connec
 	if len(c.order) > 0 {
 		c.active = c.order[0]
 	}
-	c.trustedImages = make(map[string]bool)
-	trusted, err := config.LoadTrustedImages(cfg.Dir)
+	trust, err := remotecontent.LoadTrust(cfg.Dir)
 	if err != nil {
 		logger.Warn("app: cannot read trusted image domains", "err", err)
 	}
-	for _, d := range trusted {
-		c.trustedImages[d] = true
-	}
+	c.trust = trust
 	return c
 }
 

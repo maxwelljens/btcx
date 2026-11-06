@@ -205,24 +205,44 @@ type Events interface {
 	OnDraftReady(id EditRequestID, draft ComposeDraft)
 }
 
-// Controller is implemented by the application layer (internal/app) and
-// called by the UI on the main thread. Methods return promptly; results
-// arrive through Events.
-type Controller interface {
+// Lifecycle controls the controller's own lifetime. The UI calls Start once
+// the main window exists and Shutdown when the application quits.
+type Lifecycle interface {
 	// Start connects configured accounts, loads folder lists, starts
 	// new-mail watchers and runs script on_startup hooks.
 	Start() error
 	// Shutdown cancels watchers, closes connections and cleans up sessions.
 	Shutdown()
+}
 
+// AccountAdmin manages the account list, the folder/message navigation state
+// and the account files written by the setup wizard.
+type AccountAdmin interface {
 	Accounts() []AccountInfo
 	ActiveAccount() string
 	SelectAccount(name string)
 	SelectFolder(account, folder string)
-	OpenMessage(account string, ref model.Ref)
 	Refresh(account string)
 	Search(account, folder, query string)
 
+	// CreateAccount validates spec and writes it to
+	// accounts/<name>.toml in the configuration directory, returning the
+	// file path. The file is created 0600 when it stores a password.
+	CreateAccount(spec AccountSpec) (string, error)
+	// VerifyAccount tests IMAP login and SMTP submission for spec
+	// asynchronously (nothing is sent); the outcome arrives via
+	// OnVerifyResult. Password handling mirrors the account's config.
+	VerifyAccount(spec AccountSpec)
+	// Reload re-reads the configuration directory and reconnects: used
+	// after the user edits files by hand or creates an account. Safe to
+	// call at any time; in-flight operations are cancelled.
+	Reload()
+}
+
+// MailReader opens messages, changes their flags and handles their attachments
+// and remote content.
+type MailReader interface {
+	OpenMessage(account string, ref model.Ref)
 	MarkSeen(account string, ref model.Ref, seen bool)
 	SetFlagged(account string, ref model.Ref, flagged bool)
 	DeleteMessage(account string, ref model.Ref)
@@ -234,7 +254,14 @@ type Controller interface {
 	// SaveAttachment writes attachment index of the message to destPath
 	// (a full file path chosen by the UI with the suggested safe name).
 	SaveAttachment(account string, ref model.Ref, index int, destPath string) error
+	// TrustImageDomain remembers (persistently) that remote images in
+	// messages from this sender domain are always loaded. The domain is
+	// normalized and validated; a bad input is an error, not a silent no-op.
+	TrustImageDomain(domain string) error
+}
 
+// Composer builds, edits and submits outgoing messages.
+type Composer interface {
 	NewCompose(account string) ComposeDraft
 	// StartReply builds a reply draft asynchronously (it may fetch the
 	// original message) and returns a correlation id; the result arrives
@@ -249,25 +276,17 @@ type Controller interface {
 	Send(draft ComposeDraft) SendID
 	// SaveDraft appends the draft to the account's Drafts mailbox.
 	SaveDraft(draft ComposeDraft)
-	// TrustImageDomain remembers (persistently) that remote images in
-	// messages from this sender domain are always loaded. The domain is
-	// normalized and validated; a bad input is an error, not a silent no-op.
-	TrustImageDomain(domain string) error
 	// StartExternalEdit opens the draft in the configured external editor
 	// and returns a correlation id; the result arrives via
 	// OnExternalEditDone when the editor exits.
 	StartExternalEdit(draft ComposeDraft) EditRequestID
+}
 
-	// CreateAccount validates spec and writes it to
-	// accounts/<name>.toml in the configuration directory, returning the
-	// file path. The file is created 0600 when it stores a password.
-	CreateAccount(spec AccountSpec) (string, error)
-	// VerifyAccount tests IMAP login and SMTP submission for spec
-	// asynchronously (nothing is sent); the outcome arrives via
-	// OnVerifyResult. Password handling mirrors the account's config.
-	VerifyAccount(spec AccountSpec)
-	// Reload re-reads the configuration directory and reconnects: used
-	// after the user edits files by hand or creates an account. Safe to
-	// call at any time; in-flight operations are cancelled.
-	Reload()
+// Controller is the full application surface the UI drives. Consumers that
+// only need one role take that role interface instead.
+type Controller interface {
+	Lifecycle
+	AccountAdmin
+	MailReader
+	Composer
 }

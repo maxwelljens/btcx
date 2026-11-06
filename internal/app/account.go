@@ -4,9 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/mail"
-	"regexp"
-	"strings"
 	"sync"
 	"time"
 
@@ -15,10 +12,6 @@ import (
 	"btcx/internal/imapx"
 	"btcx/internal/smtpx"
 )
-
-// accountNameRE is the accepted shape of an account name. The name becomes the
-// accounts/<name>.toml file stem, so it must stay a plain lowercase word.
-var accountNameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 
 // verifyTimeout bounds each VerifyAccount connection test.
 const verifyTimeout = 15 * time.Second
@@ -190,106 +183,40 @@ func (c *Controller) rebuildAccounts() error {
 // accountFromSpec validates and normalises a wizard spec into a configuration
 // account. Nothing is written to disk.
 func accountFromSpec(spec contract.AccountSpec) (config.Account, error) {
-	email := strings.TrimSpace(spec.Email)
-	if email == "" {
-		return config.Account{}, errors.New("email is required")
+	if err := spec.Normalize(); err != nil {
+		return config.Account{}, err
 	}
-	addr, err := mail.ParseAddress(email)
-	if err != nil || addr.Address != email {
-		return config.Account{}, fmt.Errorf("email = %q: not a bare address (example: max@example.org)", email)
-	}
-
-	name := strings.TrimSpace(spec.Name)
-	if name == "" {
-		name = defaultAccountName(email)
-	}
-	if !accountNameRE.MatchString(name) {
-		return config.Account{}, fmt.Errorf("name = %q: use lowercase letters, digits, '-' or '_'", name)
-	}
-
-	display := strings.TrimSpace(spec.DisplayName)
-	if display == "" {
-		display, _, _ = strings.Cut(email, "@")
-	}
-
-	password := spec.Password
 	var command []string
 	if spec.PasswordCommand != "" {
-		if password != "" {
-			return config.Account{}, errors.New("set either password or password_command, not both")
-		}
+		var err error
 		if command, err = config.SplitCommand(spec.PasswordCommand); err != nil {
 			return config.Account{}, fmt.Errorf("password_command: %w", err)
 		}
 	}
-
-	imap, err := serverFromSpec("imap", spec.IMAP, email, 993, 143)
-	if err != nil {
-		return config.Account{}, err
+	imap := config.Server{
+		Host:            spec.IMAP.Host,
+		Port:            spec.IMAP.Port,
+		Username:        spec.IMAP.Username,
+		TLS:             config.TLSMode(spec.IMAP.TLS),
+		Password:        spec.Password,
+		PasswordCommand: command,
 	}
-	smtp, err := serverFromSpec("smtp", spec.SMTP, email, 465, 587)
-	if err != nil {
-		return config.Account{}, err
+	smtp := config.Server{
+		Host:            spec.SMTP.Host,
+		Port:            spec.SMTP.Port,
+		Username:        spec.SMTP.Username,
+		TLS:             config.TLSMode(spec.SMTP.TLS),
+		Password:        spec.Password,
+		PasswordCommand: command,
 	}
-	imap.Password, imap.PasswordCommand = password, command
-	smtp.Password, smtp.PasswordCommand = password, command
-
 	return config.Account{
-		Name:        name,
-		DisplayName: display,
-		Email:       email,
+		Name:        spec.Name,
+		DisplayName: spec.DisplayName,
+		Email:       spec.Email,
 		IMAP:        imap,
 		SMTP:        smtp,
 		Signature:   spec.Signature,
 	}, nil
-}
-
-// serverFromSpec validates one wizard server and applies the port and username
-// defaults: 0 selects the conventional port for the TLS mode, and an empty
-// username falls back to the account address.
-func serverFromSpec(which string, s contract.ServerSpec, email string, implicitPort, starttlsPort int) (config.Server, error) {
-	host := strings.TrimSpace(s.Host)
-	if host == "" {
-		return config.Server{}, fmt.Errorf("%s.host is required", which)
-	}
-	mode := config.TLSMode(strings.ToLower(strings.TrimSpace(s.TLS)))
-	switch mode {
-	case config.TLSImplicit, config.TLSStartTLS:
-	default:
-		return config.Server{}, fmt.Errorf("%s.tls = %q: must be \"tls\" or \"starttls\"", which, s.TLS)
-	}
-	port := s.Port
-	if port == 0 {
-		port = implicitPort
-		if mode == config.TLSStartTLS {
-			port = starttlsPort
-		}
-	}
-	if port < 1 || port > 65535 {
-		return config.Server{}, fmt.Errorf("%s.port = %d: must be between 1 and 65535", which, s.Port)
-	}
-	username := s.Username
-	if username == "" {
-		username = email
-	}
-	return config.Server{Host: host, Port: port, Username: username, TLS: mode}, nil
-}
-
-// defaultAccountName derives an account name from the email domain, dropping
-// every character outside [a-z0-9_-].
-func defaultAccountName(email string) string {
-	_, domain, ok := strings.Cut(email, "@")
-	if !ok {
-		return ""
-	}
-	var b strings.Builder
-	for _, r := range strings.ToLower(domain) {
-		switch {
-		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '-', r == '_':
-			b.WriteRune(r)
-		}
-	}
-	return strings.TrimLeft(b.String(), "-_")
 }
 
 // checkIMAP is VerifyAccount's IMAP probe: dial and list the mailboxes.
