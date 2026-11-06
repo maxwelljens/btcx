@@ -23,6 +23,12 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
   header-injection rejection, envelope-only Bcc, and round-trip tests.
 - HTML sanitization and Pango markup rendering for safe mail display, with
   remote images blocked by default and fuzz coverage.
+- **HTML mail rendered for real** in a hardened WebKitGTK view (GTK4
+  flavour): full layout and inline images with JavaScript disabled and
+  zero network requests — `render.WebHTML` re-sanitizes and inlines every
+  image as a data URI, remote images stay blocked until opted in, link
+  clicks open in the external browser (the view never navigates), and the
+  web process runs sandboxed.
 - IMAP client (TLS-only, UID operations, IDLE new-mail watching, bounded
   connect phase and LIST) and SMTP submission client (TLS-before-AUTH, typed
   recipient errors, bounded connect phase), tested against in-process servers.

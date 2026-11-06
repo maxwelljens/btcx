@@ -3,7 +3,8 @@
 btcx is a lean, production-grade mail user agent (MUA) for Linux, written in
 Go with a gotk4 (GTK4) front end and optional Lua scripting. It targets the
 user who likes Thunderbird's competence but not its bulk: full-featured mail
-handling, zero bloat, no calendar, no contacts, no WebKit.
+handling, zero bloat, no calendar, no contacts. HTML mail renders in a
+hardened WebKitGTK view with JavaScript disabled and no network access.
 
 This file is the authoritative development guide for humans and AI agents
 working on the codebase. Read it before making changes.
@@ -39,7 +40,8 @@ internal/
                          multipart/alternative, attachments, replies)
   sanitize/              HTML sanitization for untrusted mail bodies
   render/                sanitized HTML -> Pango markup for display,
-                         HTML -> plain text fallback
+                         HTML -> plain text fallback, and web-ready HTML
+                         with images inlined as data URIs
   imapx/                 IMAP client: folders, envelopes, bodies, flags,
                          search, IDLE watching
   smtpx/                 SMTP submission: TLS, auth, send
@@ -48,6 +50,9 @@ internal/
                          secure temp files, built-in editor buffer logic
   contract/              app<->ui boundary: view models + Controller/Events
                          interfaces (compiles independently of both sides)
+  webview/               hardened WebKitGTK (6, GTK4 flavour) embedding for
+                         HTML mail: JS off, no network, external links
+                         (cgo; note webkit2gtk-4.1 is the GTK3 flavour)
   ui/                    gotk4 widgets and views (thin; no business logic)
   app/                   presenters/controllers wiring model + services + ui
   buildinfo/             version/commit build metadata (ldflags)
@@ -128,6 +133,15 @@ Mail content, server responses, and filenames are untrusted input.
    URLs, and CSS imports. Remote content (http/https images) is blocked by
    default (privacy + tracking); only `cid:` references to message parts may
    render inline.
+   HTML mail renders in `internal/webview` (WebKitGTK 6, the GTK4 flavour —
+   NOT webkit2gtk-4.1, which links GTK3). The guarantees: JavaScript,
+   developer extras and web APIs are disabled in settings; the view never
+   performs network requests (every image is inlined as a data URI by
+   `render.WebHTML`, which re-sanitizes defensively); navigation is always
+   ignored except the one internal `about:blank` document load; link clicks
+   open in the external browser via the `openURL` callback; the WebKit web
+   process runs sandboxed. Any weakening of these guarantees requires new
+   tests in `internal/webview`.
 4. **Command execution.** External editors and `password_command` run
    WITHOUT a shell: split the configured command into argv (shell-like
    quoting rules), substitute the file path as a single argument, and exec

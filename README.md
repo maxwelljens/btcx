@@ -2,8 +2,9 @@
 
 btcx is a modern, production-grade mail user agent for Linux. It does mail —
 composing, reading, searching, watching — and nothing else. No calendar, no
-contacts, no feed reader, no WebKit. Thunderbird's competence without the
-bulk.
+contacts, no feed reader. Thunderbird's competence without the bulk. HTML
+mail renders for real in a hardened WebKitGTK view: JavaScript off, zero
+network requests, links open in your browser.
 
 ## Highlights
 
@@ -15,8 +16,13 @@ bulk.
   pane with safe HTML rendering, compose window.
 - **Compose and read** plain-text and HTML mail with attachments and inline
   images.
-- **Safe HTML**: every remote body is sanitized; remote images (tracking
-  pixels) are blocked by default.
+- **HTML mail rendered for real**: newsletters and formatted mail display
+  with full layout and inline images in a hardened WebKitGTK view —
+  JavaScript and plugins off, every image served as an inlined data URI
+  (the view never touches the network), remote images still blocked by
+  default until you opt in, links open in your external browser.
+- **Safe HTML**: every remote body is sanitized before display; remote
+  images (tracking pixels) are blocked by default.
 - **Built-in editor** or your own: nvim, vim, helix, whatever `$VISUAL`
   points at.
 - **New-mail watching** via IMAP IDLE — the list updates live.
@@ -27,9 +33,11 @@ bulk.
 
 ## Requirements
 
-- Linux with GTK4 (runtime). Build needs Go 1.24+, a C toolchain, and GTK4
-  development headers (`libgtk-4-dev` on Debian/Ubuntu, `gtk4-devel` on
-  Fedora).
+- Linux with GTK4 and **WebKitGTK 6** (the GTK4 flavour — e.g.
+  `libwebkitgtk-6.0-dev` on Debian/Ubuntu, `webkitgtk6-devel` on Fedora).
+  Note `webkit2gtk-4.1` will NOT work: it links GTK3.
+- Build: Go 1.24+, a C toolchain, and the GTK4 development headers
+  (`libgtk-4-dev` on Debian/Ubuntu, `gtk4-devel` on Fedora).
 
 ## Building
 
