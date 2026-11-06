@@ -61,6 +61,15 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Architecture hardening from a dedicated review: async reply/forward
+  drafts (`StartReply`/`StartForward` + `OnDraftReady`) no longer block the
+  UI thread, send results are correlated per window (`SendID`), `Reload`
+  drops the previous generation's cached bodies, the message cache and
+  per-account mail state live in self-locking modules, remote-image policy
+  (SSRF-safe fetching, trusted domains) moved to `internal/remotecontent`,
+  `contract.Controller` splits into focused role interfaces, and account
+  spec validation exists once (`AccountSpec.Normalize`) instead of three
+  divergent copies.
 - File pickers and confirmation dialogs use the modern GTK4 APIs
   (`FileDialog`, modal alert windows, `DropDown`); the lint gate now
   includes golangci-lint (standard set + gosec, config in

@@ -48,8 +48,12 @@ internal/
   script/                Lua sandbox (go-lua): hooks and safe API
   editor/                external editor integration (nvim, vim, $EDITOR),
                          secure temp files, built-in editor buffer logic
-  contract/              app<->ui boundary: view models + Controller/Events
-                         interfaces (compiles independently of both sides)
+  contract/              app<->ui boundary: view models + Controller (split
+                         into Lifecycle/AccountAdmin/MailReader/Composer
+                         roles) + Events + AccountSpec.Normalize
+  remotecontent/         remote-image policy and plumbing: SSRF-safe
+                         fetching, blocked-image extraction, trusted
+                         sender-domain allowlist (GTK-free)
   webview/               hardened WebKitGTK (6, GTK4 flavour) embedding for
                          HTML mail: JS off, no network, external links
                          (cgo; note webkit2gtk-4.1 is the GTK3 flavour)
