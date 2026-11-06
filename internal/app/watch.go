@@ -5,8 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"sort"
-
-	"btcx/internal/contract"
 )
 
 // startWatch launches the new-mail watcher for an account once.
@@ -94,18 +92,7 @@ func (c *Controller) handleNewMail(ctx context.Context, st *accountState, uids [
 		return
 	}
 
-	c.mu.Lock()
-	// A search result list is a subset of the folder; merging new mail into it
-	// would mix folder rows into the search and corrupt the counts.
-	viewing := st.folder == inboxName && !st.searching
-	var rows []contract.MessageRow
-	if viewing {
-		st.rows = mergeRows(rowsFromEnvelopes(envs), st.rows)
-		st.counts[inboxName] = countRows(st.rows)
-		// Copy under the lock: flag updates mutate st.rows in place.
-		rows = append([]contract.MessageRow(nil), st.rows...)
-	}
-	c.mu.Unlock()
+	rows, merged := st.mail.MergeInbox(rowsFromEnvelopes(envs))
 
 	for _, env := range envs {
 		c.events.OnNewMail(st.cfg.Name, rowFromEnvelope(env))
@@ -113,7 +100,7 @@ func (c *Controller) handleNewMail(ctx context.Context, st *accountState, uids [
 			c.reportWarnings("on_new_mail", eng.OnNewMail(env))
 		}
 	}
-	if viewing {
+	if merged {
 		c.events.OnMessages(st.cfg.Name, inboxName, rows)
 		c.events.OnFolders(st.cfg.Name, c.folderInfos(st))
 	}

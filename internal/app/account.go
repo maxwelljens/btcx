@@ -162,7 +162,7 @@ func (c *Controller) rebuildAccounts() error {
 	c.accounts = make(map[string]*accountState, len(cfg.Accounts))
 	c.order = make([]string, 0, len(cfg.Accounts))
 	for _, a := range cfg.Accounts {
-		c.accounts[a.Name] = &accountState{cfg: a, counts: map[string]folderCount{}}
+		c.accounts[a.Name] = newAccountState(a)
 		c.order = append(c.order, a.Name)
 	}
 	if _, ok := c.accounts[c.active]; !ok {
@@ -171,6 +171,10 @@ func (c *Controller) rebuildAccounts() error {
 			c.active = c.order[0]
 		}
 	}
+	// The cache is keyed by ref, and the next generation may be a different
+	// server that mints the same UIDVALIDITY: never serve its predecessor's
+	// bodies.
+	c.cache.Clear()
 	c.runCtx, c.runCancel = context.WithCancel(c.ctx)
 	c.mu.Unlock()
 

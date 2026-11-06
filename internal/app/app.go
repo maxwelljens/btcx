@@ -6,7 +6,8 @@
 // Threading: every Controller method returns promptly. Anything that touches
 // the network runs on a goroutine owned by the controller (goRun) and reports
 // exclusively through contract.Events, which may be called from any goroutine.
-// All mutable state is guarded by Controller.mu.
+// Controller.mu guards the controller's own fields and account session state;
+// the message cache and per-account mail state carry their own locks.
 //
 // The seams a fake implements in tests are Connector (opening connections,
 // delivering mail), MailClient (one IMAP session) and the verifyIMAP and
@@ -81,54 +82,28 @@ type Connector interface {
 	Send(ctx context.Context, account config.Account, raw []byte, rcpts []model.Address) error
 }
 
-// accountState is the per-account runtime state. Every field except cfg is
-// guarded by Controller.mu; dialMu serializes connection attempts.
+// accountState is the per-account runtime state. Every field except cfg and
+// mail is guarded by Controller.mu; dialMu serializes connection attempts.
 type accountState struct {
 	cfg config.Account
 
 	dialMu sync.Mutex
 	client MailClient
 
-	folders  []model.Mailbox
-	counts   map[string]folderCount
-	folder   string
-	rows     []contract.MessageRow
+	// mail is the folder list and message rows; it has its own lock.
+	mail     *mailState
 	watching bool
-	// searching marks rows as a search subset rather than the whole folder,
-	// so flag updates and new-mail merges leave the folder counts and list
-	// alone.
-	searching bool
+}
+
+// newAccountState returns the runtime state for a configured account.
+func newAccountState(a config.Account) *accountState {
+	return &accountState{cfg: a, mail: newMailState()}
 }
 
 // folderCount is a folder's total and unread message counts.
 type folderCount struct {
 	total  int
 	unread int
-}
-
-// cacheKey identifies a cached message. model.Ref is unique per server, so
-// two accounts can mint identical refs: the account must be part of the key
-// or one account would be served the other's mail.
-type cacheKey struct {
-	account string
-	ref     model.Ref
-}
-
-// cachedMessage is a parsed message and the raw bytes it was parsed from. The
-// raw form is kept so a forward can enclose the original verbatim instead of
-// a re-serialization that mints a new Message-ID and Date.
-type cachedMessage struct {
-	msg *model.Message
-	raw []byte
-}
-
-// size is the memory the entry is charged against the cache budget.
-func (e *cachedMessage) size() int {
-	n := len(e.raw) + len(e.msg.Plain) + len(e.msg.HTML)
-	for _, a := range e.msg.Attachments {
-		n += len(a.Data)
-	}
-	return n
 }
 
 // Controller implements contract.Controller.
@@ -154,17 +129,13 @@ type Controller struct {
 	// reloadMu serializes configuration reloads.
 	reloadMu sync.Mutex
 
-	mu        sync.Mutex
-	accounts  map[string]*accountState
-	order     []string
-	active    string
-	scripts   *script.Engine
-	messages  map[cacheKey]*cachedMessage
-	msgOrder  []cacheKey
-	cacheSize int
-	// cacheBudget caps cacheSize; tests lower it so eviction is exercised
-	// without allocating 256 MiB.
-	cacheBudget int
+	mu       sync.Mutex
+	accounts map[string]*accountState
+	order    []string
+	active   string
+	scripts  *script.Engine
+	// cache holds parsed messages; it has its own lock.
+	cache *messageCache
 	// trustedImages holds sender domains whose remote images always load
 	// (persisted in remote_images.toml).
 	trustedImages map[string]bool
@@ -228,23 +199,22 @@ func New(cfg *config.Config, events contract.Events, logger *slog.Logger, connec
 	ctx, cancel := context.WithCancel(context.Background())
 	runCtx, runCancel := context.WithCancel(ctx)
 	c := &Controller{
-		cfg:         cfg,
-		events:      events,
-		log:         logger,
-		conn:        connector,
-		http:        newHTTPClient(),
-		ctx:         ctx,
-		cancel:      cancel,
-		runCtx:      runCtx,
-		runCancel:   runCancel,
-		accounts:    make(map[string]*accountState, len(cfg.Accounts)),
-		messages:    make(map[cacheKey]*cachedMessage),
-		cacheBudget: maxCacheBytes,
+		cfg:       cfg,
+		events:    events,
+		log:       logger,
+		conn:      connector,
+		http:      newHTTPClient(),
+		ctx:       ctx,
+		cancel:    cancel,
+		runCtx:    runCtx,
+		runCancel: runCancel,
+		accounts:  make(map[string]*accountState, len(cfg.Accounts)),
+		cache:     newMessageCache(maxCacheBytes),
 	}
 	c.verifyIMAP = c.checkIMAP
 	c.verifySMTP = c.checkSMTP
 	for _, a := range cfg.Accounts {
-		c.accounts[a.Name] = &accountState{cfg: a, counts: map[string]folderCount{}}
+		c.accounts[a.Name] = newAccountState(a)
 		c.order = append(c.order, a.Name)
 	}
 	if len(c.order) > 0 {

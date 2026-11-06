@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"btcx/internal/config"
 	"btcx/internal/imapx"
 	"btcx/internal/model"
 )
@@ -327,25 +328,22 @@ func TestMessageCacheIsPerAccount(t *testing.T) {
 func TestCacheEvictsByByteBudget(t *testing.T) {
 	cfg := testConfig(t, testAccount("alice"))
 	c, _, _ := newTestController(t, cfg, newFakeServer())
-	c.cacheBudget = 2000
+	c.cache = newMessageCache(2000)
 
 	for uid := uint32(1); uid <= 5; uid++ {
 		msg := &model.Message{Plain: strings.Repeat("x", 900)}
-		c.cacheMessage("alice", model.Ref{Mailbox: "INBOX", UIDValidity: 1, UID: uid}, msg, nil)
+		c.cache.Put(cacheKey{account: "alice", ref: model.Ref{Mailbox: "INBOX", UIDValidity: 1, UID: uid}}, msg, nil)
 	}
 
-	c.mu.Lock()
-	size, count := c.cacheSize, len(c.messages)
-	_, keptNewest := c.messages[cacheKey{"alice", model.Ref{Mailbox: "INBOX", UIDValidity: 1, UID: 5}}]
-	_, keptOldest := c.messages[cacheKey{"alice", model.Ref{Mailbox: "INBOX", UIDValidity: 1, UID: 1}}]
-	order := len(c.msgOrder)
-	c.mu.Unlock()
+	count, size := c.cache.Stats()
+	_, keptNewest := c.cache.Get(cacheKey{"alice", model.Ref{Mailbox: "INBOX", UIDValidity: 1, UID: 5}})
+	_, keptOldest := c.cache.Get(cacheKey{"alice", model.Ref{Mailbox: "INBOX", UIDValidity: 1, UID: 1}})
 
-	if size > c.cacheBudget {
-		t.Errorf("cache size = %d, want <= %d", size, c.cacheBudget)
+	if size > 2000 {
+		t.Errorf("cache size = %d, want <= 2000", size)
 	}
-	if count != 2 || order != 2 {
-		t.Errorf("cached entries = %d (order %d), want 2 for a 2000-byte budget of 900-byte messages", count, order)
+	if count != 2 {
+		t.Errorf("cached entries = %d, want 2 for a 2000-byte budget of 900-byte messages", count)
 	}
 	if !keptNewest {
 		t.Error("newest message was evicted")
@@ -353,6 +351,46 @@ func TestCacheEvictsByByteBudget(t *testing.T) {
 	if keptOldest {
 		t.Error("oldest message survived; eviction is not oldest-first")
 	}
+}
+
+// TestReloadDropsCachedBodies proves a reload does not serve the previous
+// generation's mail: the next server may mint the same UIDVALIDITY and refs.
+func TestReloadDropsCachedBodies(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := config.WriteAccount(dir, testAccount("alice")); err != nil {
+		t.Fatalf("write alice: %v", err)
+	}
+	cfg, _, err := config.LoadDir(dir)
+	if err != nil {
+		t.Fatalf("LoadDir: %v", err)
+	}
+
+	srv := newFakeServer()
+	srv.addBox("INBOX")
+	srv.seed("INBOX", 1)
+	ref := model.Ref{Mailbox: "INBOX", UIDValidity: 1, UID: 1}
+	srv.setRaw(ref, accountMessage("alice"))
+
+	c, ev, _ := newTestController(t, cfg, srv)
+	startApp(t, c, ev, "alice")
+	ev.wait(t, "rows", func() bool { return len(ev.messageRows("alice", "INBOX")) == 1 })
+
+	c.OpenMessage("alice", ref)
+	ev.wait(t, "first body", func() bool {
+		view, ok := ev.openedView(ref)
+		return ok && strings.Contains(view.Subject, "alice")
+	})
+
+	// The server behind the same ref now holds different mail.
+	srv.setRaw(ref, accountMessage("bob"))
+	c.Reload()
+	ev.wait(t, "cache cleared", func() bool { n, _ := c.cache.Stats(); return n == 0 })
+
+	c.OpenMessage("alice", ref)
+	ev.wait(t, "refetched body", func() bool {
+		view, ok := ev.openedView(ref)
+		return ok && strings.Contains(view.Subject, "bob")
+	})
 }
 
 // TestSearchLeavesFolderCountsAlone proves a search result set never rewrites
@@ -385,9 +423,8 @@ func TestSearchLeavesFolderCountsAlone(t *testing.T) {
 	c.Search("alice", "INBOX", "needle")
 	ev.wait(t, "search rows", func() bool { return len(ev.messageRows("alice", "INBOX")) == 2 })
 	ev.wait(t, "folders after search", func() bool {
-		c.mu.Lock()
-		defer c.mu.Unlock()
-		return c.accounts["alice"].searching
+		_, searching := c.state("alice").mail.Current()
+		return searching
 	})
 
 	if gotTotal, gotUnread := inbox(); gotTotal != total || gotUnread != unread {
@@ -400,11 +437,9 @@ func TestSearchLeavesFolderCountsAlone(t *testing.T) {
 	if rows := ev.messageRows("alice", "INBOX"); len(rows) != 2 {
 		t.Errorf("rows after new mail = %d, want the 2 search rows", len(rows))
 	}
-	c.mu.Lock()
-	rows, searching := len(st.rows), st.searching
-	c.mu.Unlock()
-	if rows != 2 || !searching {
-		t.Errorf("stored rows = %d (searching %v), want 2 search rows", rows, searching)
+	_, searching := st.mail.Current()
+	if rows := st.mail.Rows(); len(rows) != 2 || !searching {
+		t.Errorf("stored rows = %d (searching %v), want 2 search rows", len(rows), searching)
 	}
 	if len(ev.newMailRows()) != 1 {
 		t.Errorf("new mail not announced during a search: %+v", ev.newMailRows())
