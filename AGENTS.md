@@ -138,9 +138,12 @@ Mail content, server responses, and filenames are untrusted input.
    Attachment filenames are sanitized (`filepath.Base`, strip separators and
    `..`, reject empty/absolute) before being used anywhere.
 6. **Resource exhaustion.** MIME parsing enforces a maximum nesting depth,
-   caps decoded attachment memory (larger parts stream to temp files), and
-   fuzz tests must stay panic-free. Message list rendering uses virtualized
-   lists (GTK ColumnView), never per-message widgets for unbounded lists.
+   part count, and decoded-size caps; the parsed-message cache is
+   byte-budgeted with LRU eviction so server-controlled content cannot
+   multiply memory use (streaming oversized parts to temp files is the
+   planned next step). Fuzz tests must stay panic-free. Message list
+   rendering uses virtualized lists (GTK ColumnView), never per-message
+   widgets for unbounded lists.
 7. **Lua sandbox.** Scripts cannot run shell commands, open files, or load
    modules. Only the curated `btcx.*` API and Lua's safe standard libraries
    (`string`, `table`, `math`, parts of `base`) are available. Hook execution
