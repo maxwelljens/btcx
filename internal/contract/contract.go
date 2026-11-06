@@ -112,6 +112,42 @@ type ComposeDraft struct {
 // its OnExternalEditDone result.
 type EditRequestID int
 
+// AccountSpec is the structured account input produced by the first-run
+// setup wizard. The application validates it and writes it as
+// accounts/<name>.toml.
+type AccountSpec struct {
+	Name            string     // account name (file stem); derived from email when empty
+	DisplayName     string     // From display name
+	Email           string     // the user's e-mail address
+	IMAP            ServerSpec // incoming server
+	SMTP            ServerSpec // outgoing server
+	Password        string     // stored in the account file (0600) when set; XOR PasswordCommand
+	PasswordCommand string     // e.g. "pass show mail/example.org"; shell-free argv split
+	Signature       string     // plain-text signature
+}
+
+// ServerSpec describes one mail server in wizard terms.
+type ServerSpec struct {
+	Host     string
+	Port     int // 0 selects the TLS-mode default (993/143 IMAP, 465/587 SMTP)
+	Username string
+	TLS      string // "tls" (implicit) or "starttls"
+}
+
+// ServerCheck is one server's connection test outcome. Detail is a short
+// human-readable sentence suitable for display ("connected, TLS verified,
+// logged in" or the precise failure); it must never contain secrets.
+type ServerCheck struct {
+	OK     bool
+	Detail string
+}
+
+// VerifyResult reports the outcome of VerifyAccount for both servers.
+type VerifyResult struct {
+	IMAP ServerCheck
+	SMTP ServerCheck
+}
+
 // Events is implemented by the UI. The controller calls these from
 // arbitrary goroutines; implementations marshal onto the GTK main loop.
 type Events interface {
@@ -131,6 +167,8 @@ type Events interface {
 	OnMessageOpened(view MessageView)
 	// OnSendResult reports the outcome of Send (script hooks may veto).
 	OnSendResult(success bool, message string)
+	// OnVerifyResult reports the outcome of VerifyAccount.
+	OnVerifyResult(result VerifyResult)
 	// OnExternalEditDone returns the draft after the external editor exits.
 	OnExternalEditDone(id EditRequestID, draft ComposeDraft, err error)
 }
@@ -177,4 +215,17 @@ type Controller interface {
 	// and returns a correlation id; the result arrives via
 	// OnExternalEditDone when the editor exits.
 	StartExternalEdit(draft ComposeDraft) EditRequestID
+
+	// CreateAccount validates spec and writes it to
+	// accounts/<name>.toml in the configuration directory, returning the
+	// file path. The file is created 0600 when it stores a password.
+	CreateAccount(spec AccountSpec) (string, error)
+	// VerifyAccount tests IMAP login and SMTP submission for spec
+	// asynchronously (nothing is sent); the outcome arrives via
+	// OnVerifyResult. Password handling mirrors the account's config.
+	VerifyAccount(spec AccountSpec)
+	// Reload re-reads the configuration directory and reconnects: used
+	// after the user edits files by hand or creates an account. Safe to
+	// call at any time; in-flight operations are cancelled.
+	Reload()
 }
