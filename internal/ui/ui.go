@@ -47,6 +47,10 @@ type Options struct {
 	FirstRun bool
 	// GeneratedFiles lists what FirstRun created, relative to ConfigDir.
 	GeneratedFiles []string
+	// AppID is the GApplication id; empty means "org.btcx.Mail".
+	// Tests set a unique id so a running btcx instance (GApplication is
+	// single-instance) cannot swallow the test activation.
+	AppID string
 }
 
 // Run builds the GTK application, wires controller and events, runs the main
@@ -61,7 +65,11 @@ func Run(opts Options, controller contract.Controller, argv []string) int {
 		sink.SetEvents(a)
 	}
 
-	gtkApp := gtk.NewApplication("org.btcx.Mail", gio.ApplicationDefaultFlags)
+	appID := opts.AppID
+	if appID == "" {
+		appID = "org.btcx.Mail"
+	}
+	gtkApp := gtk.NewApplication(appID, gio.ApplicationDefaultFlags)
 	a.gtkApp = gtkApp
 
 	gtkApp.ConnectActivate(func() {

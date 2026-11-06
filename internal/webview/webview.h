@@ -32,6 +32,8 @@ void btcx_webview_set_visible(WebKitWebView *view, gboolean visible);
 
 gboolean btcx_webview_gtk_init(void);
 gboolean btcx_webview_settings_javascript(uintptr_t view);
+void btcx_webview_focus(WebKitWebView *view);
+gboolean btcx_webview_widget_has_focus(uintptr_t view);
 gboolean btcx_webview_widget_visible(uintptr_t view);
 uintptr_t btcx_webview_widget_parent(uintptr_t view);
 /* Borrowed string, valid while the view lives. */

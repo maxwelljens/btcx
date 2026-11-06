@@ -159,6 +159,19 @@ btcx_webview_settings_javascript(uintptr_t view)
         webkit_web_view_get_settings(WEBKIT_WEB_VIEW((GtkWidget *)(uintptr_t)view)));
 }
 
+void
+btcx_webview_focus(WebKitWebView *view)
+{
+    if (view)
+        gtk_widget_grab_focus(GTK_WIDGET(view));
+}
+
+gboolean
+btcx_webview_widget_has_focus(uintptr_t view)
+{
+    return gtk_widget_has_focus(GTK_WIDGET((GtkWidget *)(uintptr_t)view));
+}
+
 gboolean
 btcx_webview_widget_visible(uintptr_t view)
 {

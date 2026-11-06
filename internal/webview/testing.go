@@ -16,6 +16,10 @@ func probeJavaScriptEnabled(v *View) bool {
 	return C.btcx_webview_settings_javascript(ptr(v.w)) != 0
 }
 
+func probeHasFocus(v *View) bool {
+	return C.btcx_webview_widget_has_focus(ptr(v.w)) != 0
+}
+
 func probeVisible(v *View) bool { return C.btcx_webview_widget_visible(ptr(v.w)) != 0 }
 
 func probeParented(v *View) bool { return C.btcx_webview_widget_parent(ptr(v.w)) != 0 }

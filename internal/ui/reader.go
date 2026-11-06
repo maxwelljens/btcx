@@ -158,6 +158,11 @@ func (r *readerPane) show(view contract.MessageView) {
 	if view.HTMLBody != "" {
 		r.showWeb(view.HTMLBody)
 		r.scroll.SetVExpand(false)
+		// The rebuild may destroy the widget the user just clicked (e.g.
+		// "Load remote content"); GTK would fall focus to the first
+		// focusable descendant — the selectable subject label — which
+		// highlights its entire text. Keep focus in the message body.
+		r.web.Focus()
 	} else {
 		r.hideWeb()
 		r.scroll.SetVExpand(true)

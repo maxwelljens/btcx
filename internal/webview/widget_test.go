@@ -81,6 +81,14 @@ func TestWidgets(t *testing.T) {
 		t.Fatalf("view navigated to a foreign URI (title %q)", got)
 	}
 
+	// Focus management: the reader calls Focus after rebuilds so GTK cannot
+	// hand focus to the selectable subject label (which highlights its whole
+	// text when the clicked widget is destroyed).
+	v.Focus()
+	if !probeHasFocus(v) {
+		t.Fatal("Focus() did not move keyboard focus to the view")
+	}
+
 	v.Detach()
 	v.Detach() // idempotent
 	v.Load("<p>ignored</p>")

@@ -2,6 +2,7 @@ package ui
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"runtime"
@@ -491,7 +492,10 @@ func TestRunChild(t *testing.T) {
 	}
 	requireGTK(t)
 	ctrl := &autoQuitController{quitAfter: 250}
-	if code := Run(Options{Title: "btcx", Version: "test", Theme: "dark"}, ctrl, []string{"btcx"}); code != 0 {
+	// A unique id keeps GApplication single-instance handoff from a running
+	// btcx (or another test run) from swallowing this test's activation.
+	appID := fmt.Sprintf("org.btcx.MailTest%d", os.Getpid())
+	if code := Run(Options{Title: "btcx", Version: "test", Theme: "dark", AppID: appID}, ctrl, []string{"btcx"}); code != 0 {
 		t.Fatalf("Run() = %d, want 0", code)
 	}
 	for _, call := range ctrl.calls {

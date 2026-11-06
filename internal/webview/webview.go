@@ -82,6 +82,16 @@ func (v *View) Attach(boxNative uintptr) {
 	v.attached = true
 }
 
+// Focus moves keyboard focus to the view. Message rebuilds call this so
+// focus cannot fall onto the selectable header labels — a focused
+// selectable GtkLabel highlights its entire text.
+func (v *View) Focus() {
+	if v == nil || v.w == nil {
+		return
+	}
+	C.btcx_webview_focus(v.w)
+}
+
 // Load replaces the displayed document. html is a complete UTF-8 document (as
 // produced by render.WebHTML) containing only data: URIs for images — the view
 // performs NO network requests.
