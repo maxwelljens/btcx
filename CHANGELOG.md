@@ -50,6 +50,13 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 - End-to-end security pipeline test suite (hostile mail through
   parse → sanitize → render).
 
+### Changed
+
+- File pickers and confirmation dialogs use the modern GTK4 APIs
+  (`FileDialog`, modal alert windows, `DropDown`); the lint gate now
+  includes golangci-lint (standard set + gosec, config in
+  `.golangci.yml`) with every finding fixed rather than suppressed.
+
 ### Security
 
 - Message lists now show the newest messages: `Envelopes` fetched ascending
