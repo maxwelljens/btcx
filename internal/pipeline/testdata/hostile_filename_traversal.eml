@@ -1,0 +1,19 @@
+From: Mallory <mallory@evil.example>
+To: Victim <victim@example.org>
+Subject: invoice attached
+Date: Mon, 02 Jan 2006 15:04:05 -0700
+Message-ID: <fname-trav-1@evil.example>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="mix"
+
+--mix
+Content-Type: text/plain; charset=utf-8
+
+see attachment
+--mix
+Content-Type: text/plain
+Content-Disposition: attachment; filename="../../etc/passwd"
+Content-Transfer-Encoding: base64
+
+aGVsbG8=
+--mix--

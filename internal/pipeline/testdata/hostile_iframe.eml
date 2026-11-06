@@ -1,0 +1,9 @@
+From: Mallory <mallory@evil.example>
+To: Victim <victim@example.org>
+Subject: framed
+Date: Mon, 02 Jan 2006 15:04:05 -0700
+Message-ID: <iframe-1@evil.example>
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-8
+
+<p>before</p><iframe src="https://evil.example/phish"></iframe><p>after</p>

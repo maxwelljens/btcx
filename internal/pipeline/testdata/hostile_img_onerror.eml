@@ -1,0 +1,9 @@
+From: Mallory <mallory@evil.example>
+To: Victim <victim@example.org>
+Subject: picture
+Date: Mon, 02 Jan 2006 15:04:05 -0700
+Message-ID: <onerror-1@evil.example>
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-8
+
+<p><img src="broken.png" onerror="alert(1)" alt="photo"> see attached</p>

@@ -1,0 +1,11 @@
+From: Mallory <mallory@evil.example>
+To: Victim <victim@example.org>
+Subject: newsletter
+Date: Mon, 02 Jan 2006 15:04:05 -0700
+Message-ID: <remote-1@evil.example>
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-8
+
+<html><body><p>Read the news</p>
+<img src="https://tracker.example/p.gif" alt="tracking pixel" width="1" height="1">
+<p><a href="https://example.com/story">Full story</a></p></body></html>

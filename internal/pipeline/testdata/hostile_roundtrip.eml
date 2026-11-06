@@ -1,0 +1,17 @@
+From: Mallory <mallory@evil.example>
+To: Victim <victim@example.org>
+Subject: round trip <script>
+Date: Mon, 02 Jan 2006 15:04:05 -0700
+Message-ID: <roundtrip-1@evil.example>
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="alt"
+
+--alt
+Content-Type: text/plain; charset=utf-8
+
+Look: <script>alert("rt")</script> and https://tracker.example/x.gif
+--alt
+Content-Type: text/html; charset=utf-8
+
+<p>Look:</p><script>alert("rt")</script><img src="https://tracker.example/x.gif" onerror="alert(2)"><p><b>bold</b> text</p>
+--alt--

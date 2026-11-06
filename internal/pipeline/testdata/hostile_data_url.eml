@@ -1,0 +1,9 @@
+From: Mallory <mallory@evil.example>
+To: Victim <victim@example.org>
+Subject: data link
+Date: Mon, 02 Jan 2006 15:04:05 -0700
+Message-ID: <dataurl-1@evil.example>
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-8
+
+<p><a href="data:text/html,<script>alert(1)</script>">open document</a></p>

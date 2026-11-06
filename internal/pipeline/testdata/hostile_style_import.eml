@@ -1,0 +1,10 @@
+From: Mallory <mallory@evil.example>
+To: Victim <victim@example.org>
+Subject: styled
+Date: Mon, 02 Jan 2006 15:04:05 -0700
+Message-ID: <style-1@evil.example>
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-8
+
+<style>@import url("https://evil.example/x.css"); body{background:url(https://tracker.example/bg.gif)}</style>
+<p>styled body</p>

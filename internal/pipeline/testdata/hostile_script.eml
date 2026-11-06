@@ -1,0 +1,9 @@
+From: Mallory <mallory@evil.example>
+To: Victim <victim@example.org>
+Subject: harmless invoice
+Date: Mon, 02 Jan 2006 15:04:05 -0700
+Message-ID: <script-1@evil.example>
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-8
+
+<html><body><p>Please review</p><script>alert(1)</script></body></html>

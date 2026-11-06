@@ -1,0 +1,9 @@
+From: Mallory <mallory@evil.example>
+To: Victim <victim@example.org>
+Subject: vector
+Date: Mon, 02 Jan 2006 15:04:05 -0700
+Message-ID: <svg-1@evil.example>
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-8
+
+<p>logo</p><svg onload="alert(1)"><circle r="10"></circle></svg>

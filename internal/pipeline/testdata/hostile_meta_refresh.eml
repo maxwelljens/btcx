@@ -1,0 +1,10 @@
+From: Mallory <mallory@evil.example>
+To: Victim <victim@example.org>
+Subject: redirect
+Date: Mon, 02 Jan 2006 15:04:05 -0700
+Message-ID: <meta-1@evil.example>
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-8
+
+<head><meta http-equiv="refresh" content="0;url=https://evil.example/"></head>
+<p>redirecting</p>

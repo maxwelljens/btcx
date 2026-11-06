@@ -1,0 +1,11 @@
+From: Mallory <mallory@evil.example>
+To: Victim <victim@example.org>
+Subject: click here
+Date: Mon, 02 Jan 2006 15:04:05 -0700
+Message-ID: <jshref-1@evil.example>
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-8
+
+<p><a href="JaVaScRiPt:alert(1)">case smuggled</a></p>
+<p><a href="java&#9;script:alert(2)">tab smuggled</a></p>
+<p><a href="  javascript:alert(3)">space smuggled</a></p>
