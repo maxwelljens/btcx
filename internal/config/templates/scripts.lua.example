@@ -1,0 +1,99 @@
+-- ───────────────────────────────────────────────────────────────────────────
+-- btcx example Lua script — copy it to a .lua file to run it
+--
+-- btcx runs every *.lua file in its script directory (~/.config/btcx/scripts
+-- by default, or script_dir in config.toml) in file-name order. This file
+-- ends in .lua.example, so btcx ignores it. To try it:
+--
+--     cp example.lua.example 10-log-example-org.lua
+--
+-- Define any of the four hooks below. Undefined hooks are simply skipped, so
+-- delete what you do not need.
+--
+-- The sandbox: scripts cannot run programs, open files, load modules, or
+-- touch the network. Only string, table, math and safe base functions exist
+-- — no os, io, require, load or debug. Each hook call has an instruction
+-- budget (about 2 seconds of work); a script that exceeds it is disabled for
+-- the session with a visible warning. A broken script can never crash btcx
+-- or block mail. Errors are reported as warnings.
+--
+-- Full details: docs/SCRIPTING.md in the btcx source tree.
+-- ───────────────────────────────────────────────────────────────────────────
+
+
+-- on_startup() — runs once when btcx starts.
+--
+-- function on_startup()
+--   btcx.log("info", "hello from btcx " .. btcx.version())
+-- end
+
+
+-- on_new_mail(envelope) — runs once for each message that arrives while btcx
+-- is running (new mail seen by the IMAP watcher, not retroactively for old
+-- mail).
+--
+-- envelope is a plain table with these fields:
+--   message_id      string, the Message-ID header (may be empty)
+--   subject         string, may be empty
+--   date            string, RFC 3339 timestamp, e.g. "2026-11-06T09:30:00Z"
+--   mailbox         string, folder the message arrived in, e.g. "INBOX"
+--   uid             number, IMAP unique id inside that mailbox
+--   uid_validity    number, identifies the mailbox generation
+--   size            number, message size in bytes
+--   has_attachments boolean
+--   from, to, cc    arrays of { name = "...", addr = "user@example.org" }
+--   flags           table of booleans: seen, answered, flagged, deleted,
+--                   draft, recent
+--
+-- The tables are informational: changing them does not change the message.
+--
+-- This example logs every message from example.org. Addresses are not
+-- guaranteed to exist, so index defensively.
+function on_new_mail(envelope)
+  local sender = envelope.from[1]
+  if not sender then
+    return
+  end
+  if sender.addr:lower():match("@example%.org$") then
+    btcx.log("info", "mail from example.org: " .. envelope.subject)
+  end
+end
+
+
+-- before_send(message) — runs before btcx sends a message. Return false to
+-- cancel the send; both the veto and the reason are shown to you.
+--
+-- message fields: subject, plain, html (strings), from, to, cc (address
+-- arrays as above) and attachments (array of { filename, content_type,
+-- content_id, size, inline }).
+--
+-- function before_send(message)
+--   if message.subject == "" then
+--     btcx.log("warn", "refusing to send mail without a subject")
+--     return false
+--   end
+--   return true
+-- end
+
+
+-- after_send(message, sent, err_msg) — runs after a send attempt.
+-- sent is true on success; err_msg explains a failure and is empty on
+-- success.
+--
+-- function after_send(message, sent, err_msg)
+--   if not sent then
+--     btcx.log("error", "send failed: " .. err_msg)
+--   end
+-- end
+
+
+-- The btcx API available to scripts
+-- =================================
+--   btcx.log(level, msg)   level is "debug", "info", "warn" or "error";
+--                          msg is truncated at 8 KiB. Logging a password or
+--                          the body of a private message is a bad idea:
+--                          log files are plain text.
+--   btcx.version()         the running btcx version string.
+--
+-- print(...) is redirected to btcx.log("info", ...), so the example above
+-- could also use print(). btcx.log is preferred because it sets a level.

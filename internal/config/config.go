@@ -116,26 +116,26 @@ type fileConfig struct {
 
 // fileAccount mirrors accounts/<name>.toml.
 type fileAccount struct {
-	DisplayName string      `toml:"display_name"`
+	DisplayName string      `toml:"display_name,omitempty"`
 	Email       string      `toml:"email"`
-	RealName    string      `toml:"real_name"`
+	RealName    string      `toml:"real_name,omitempty"`
 	IMAP        fileServer  `toml:"imap"`
 	SMTP        fileServer  `toml:"smtp"`
 	Sent        fileMailbox `toml:"sent"`
 	Drafts      fileMailbox `toml:"drafts"`
 	Trash       fileMailbox `toml:"trash"`
-	Signature   string      `toml:"signature"`
+	Signature   string      `toml:"signature,omitempty"`
 }
 
 type fileServer struct {
 	Host               string `toml:"host"`
 	Port               int    `toml:"port"`
-	Username           string `toml:"username"`
-	Password           string `toml:"password"`
-	PasswordCommand    string `toml:"password_command"`
+	Username           string `toml:"username,omitempty"`
+	Password           string `toml:"password,omitempty"`
+	PasswordCommand    string `toml:"password_command,omitempty"`
 	TLS                string `toml:"tls"`
-	InsecureSkipVerify bool   `toml:"insecure_skip_verify"`
-	CAFile             string `toml:"ca_file"`
+	InsecureSkipVerify bool   `toml:"insecure_skip_verify,omitempty"`
+	CAFile             string `toml:"ca_file,omitempty"`
 }
 
 type fileMailbox struct {

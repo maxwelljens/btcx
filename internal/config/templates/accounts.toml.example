@@ -1,0 +1,263 @@
+# ───────────────────────────────────────────────────────────────────────────
+# btcx account example — copy this file for every account you add.
+#
+# btcx keeps one file per e-mail account in
+#
+#     ~/.config/btcx/accounts/
+#
+# The file name without ".toml" is the account name btcx shows in its account
+# switcher: "personal.toml" becomes the account "personal". Files ending in
+# ".example" (like this one) are ignored, so this reference copy stays out of
+# the way.
+#
+# SETTING UP AN ACCOUNT:
+#   1. Copy this file:   cp example.toml.example personal.toml
+#   2. Edit personal.toml and replace the example values with yours.
+#   3. Restrict it:      chmod 600 personal.toml
+#   4. Restart btcx (or use the account dialog).
+#
+# NOTHING IN THIS FILE IS ACTIVE. Every setting below is commented out, so
+# btcx only sees a description, not a configuration. To use a setting,
+# delete the leading "# " from its line. There is a complete, ready-to-edit
+# skeleton at the very bottom: "QUICK START".
+#
+# TWO SERVERS, IN PLAIN WORDS
+# ---------------------------
+# Your mail lives on two servers, and btcx needs both:
+#
+#   IMAP — incoming. The server that stores your mailboxes and messages.
+#          btcx reads it to show your mail, and writes flags (read, flagged,
+#          deleted) back to it.
+#   SMTP — outgoing. The server that accepts a message you just wrote and
+#          delivers it to the recipient.
+#
+# They often share a host name and a password, but they are separate
+# settings. If you can read mail but not send it, the [smtp] section is
+# wrong — and the other way round for [imap].
+# ───────────────────────────────────────────────────────────────────────────
+
+
+# Identity
+# ========
+
+# The name btcx shows in the account switcher and puts in front of your
+# address in the From header. Free text; "Home", "Work", your full name.
+# display_name = "Maxwell Jensen"
+
+# Your e-mail address. Must be the bare address, WITHOUT a display name —
+# "max@example.org", not "Maxwell Jensen <max@example.org>". btcx builds the
+# display name from display_name/real_name itself.
+# email = "max@example.org"
+
+# Optional From name when it differs from display_name. Leave it out and
+# display_name is used.
+# real_name = "Maxwell"
+
+
+# Incoming mail — IMAP
+# ====================
+# Find the settings on your provider's support pages: search for
+# "IMAP settings". You need the IMAP server name, the port, and usually
+# your full e-mail address as the user name.
+# [imap]
+
+# The IMAP server host name, e.g. "imap.gmail.com". No "imaps://" prefix
+# and no port here.
+# host = "imap.example.org"
+
+# Port. 993 with tls = "tls" (encrypted from the first byte), or 143 with
+# tls = "starttls". If you leave port out, btcx picks 993 for "tls" and 143
+# for "starttls".
+# port = 993
+
+# Login name. Usually your full e-mail address; a few providers use a short
+# user name instead. Check the provider's IMAP instructions.
+# username = "max@example.org"
+
+
+# Passwords — choose ONE of the two options below
+# ===============================================
+# Option A, a password in this file:
+# password = "my-secret-password"
+#
+#   Simple, and fine on a single-user machine. But any program running as
+#   you can read this file, and so can anyone who copies your backup. Keep
+#   the file private (chmod 600); btcx warns at startup if it is readable
+#   by other users.
+#
+# Option B, ask a password manager every time btcx connects:
+# password_command = "pass show mail/example.org"
+#
+#   btcx runs the command, uses its first line of output as the password,
+#   and never stores the password itself. The command is split like a shell
+#   command line but is NOT run through a shell: no pipes, no $VARS, no
+#   globbing. The program is started directly, and it has 10 seconds; on
+#   timeout it is killed. It runs again for every connection, so revoking
+#   the password in your password manager takes effect immediately.
+#
+#   Real-world examples:
+#     password_command = "pass show mail/example.org"
+#     password_command = "gopass show -o mail/example.org"
+#     password_command = "secret-tool lookup service imap account max@example.org"
+#     password_command = "bw get password example.org"
+#
+# Set exactly one of password and password_command per server. Setting both
+# is an error; setting neither is allowed (btcx just cannot log in until you
+# add one). Many providers require an app-specific password — see below.
+
+
+# Encryption — TLS
+# ================
+# tls = "tls"
+#
+#   Encrypt the connection from the first byte. This is what port 993 (IMAP)
+#   and 465 (SMTP) use, and what most people should choose.
+#
+# tls = "starttls"
+#
+#   Connect unencrypted, then upgrade to TLS before logging in. This is what
+#   port 143 (IMAP) and 587 (SMTP) use.
+#
+# Either way btcx verifies the server's certificate and host name; there is
+# no way to turn that off silently, because an unverified server can steal
+# your password and read your mail.
+#
+# If your provider uses a private certificate authority (a company mail
+# server, a self-hosted server), point btcx at that CA instead of disabling
+# verification:
+# ca_file = "/etc/ssl/private/mail-ca.pem"
+#
+# Last resort only: this turns certificate checking OFF for this server.
+# Mail and passwords can then be intercepted by anyone on the network.
+# btcx prints a loud warning at startup while it is enabled.
+# insecure_skip_verify = true
+
+
+# Outgoing mail — SMTP
+# ====================
+# Search your provider's support pages for "SMTP settings". The host is
+# often "smtp." plus your domain. Submission usually needs authentication,
+# normally the same user name and password as IMAP.
+# [smtp]
+
+# host = "smtp.example.org"
+
+# Port 587 with tls = "starttls" (the common choice), or 465 with
+# tls = "tls". Left out, btcx picks 587 for "starttls" and 465 for "tls".
+# port = 587
+
+# username = "max@example.org"
+# password = "my-secret-password"
+# password_command = "pass show mail/example.org"
+# tls = "starttls"
+# ca_file = "/etc/ssl/private/mail-ca.pem"
+# insecure_skip_verify = true
+
+
+# Common providers — copy the values that match your account
+# ==========================================================
+# These are the providers' published settings. The passwords are yours to
+# fill in; most of these providers refuse your normal account password from
+# a mail program and need an "app password" instead.
+#
+# Gmail / Google Workspace
+#   imap: host "imap.gmail.com", port 993, tls "tls"
+#   smtp: host "smtp.gmail.com", port 587, tls "starttls"
+#   username: your full address, e.g. max@gmail.com
+#   Requires 2-Step Verification, then an App Password: Google Account ->
+#   Security -> 2-Step Verification -> App passwords
+#   (https://myaccount.google.com/apppasswords). Your normal Google
+#   password will be rejected. Workspace admins may also have to allow IMAP.
+#
+# Outlook.com / Microsoft 365
+#   imap: host "outlook.office365.com", port 993, tls "tls"
+#   smtp: host "smtp.office365.com", port 587, tls "starttls"
+#   username: your full address
+#   Outlook.com needs an app password when 2-Step Verification is on.
+#   Microsoft 365 often has password (basic) authentication disabled; your
+#   administrator may need to enable SMTP AUTH for the mailbox. Newer
+#   tenants may require OAuth, which btcx does not support yet — then use a
+#   different account or the provider's app password, if offered.
+#
+# Fastmail
+#   imap: host "imap.fastmail.com", port 993, tls "tls"
+#   smtp: host "smtp.fastmail.com", port 587, tls "starttls"
+#   username: your full address
+#   Fastmail requires an app password for mail apps: Settings -> Privacy &
+#   Security -> App passwords (https://app.fastmail.com/settings/security/
+#   apppasswords). Your login password will not work.
+#
+# Yahoo Mail
+#   imap: host "imap.mail.yahoo.com", port 993, tls "tls"
+#   smtp: host "smtp.mail.yahoo.com", port 587, tls "starttls"
+#   username: your full address
+#   Requires an app password: Account Info -> Account Security -> Generate
+#   app password (https://login.yahoo.com/account/security).
+#
+# Anything else
+#   Search "<provider> IMAP settings" and "<provider> SMTP settings". You
+#   want the IMAP host/port, the SMTP host/port, whether encryption is
+#   "SSL/TLS" (btcx: tls) or "STARTTLS" (btcx: starttls), and the login
+#   name. Self-hosted servers: ask whoever runs the server.
+
+
+# Special folders
+# ===============
+# Servers keep sent, draft and deleted mail in folders with names of their
+# own choosing ("Sent", "Sent Items", "Sent Mail", "[Gmail]/Sent Mail",
+# "INBOX.Drafts", ...). Tell btcx the exact, case-sensitive names your
+# server uses — look at them in the provider's webmail. The defaults are
+# shown. You only need to change what is different.
+# [sent]
+# mailbox = "Sent"
+#
+# [drafts]
+# mailbox = "Drafts"
+#
+# [trash]
+# mailbox = "Trash"
+
+
+# Signature
+# =========
+# Plain text appended to every message you compose. Multi-line text needs
+# TOML's triple-quoted string; a leading newline right after the opening
+# """ is dropped, so the signature starts with "--".
+# signature = """
+# --
+# Maxwell Jensen
+# max@example.org
+# """
+
+
+# QUICK START — uncomment this block and fill in three values
+# ===========================================================
+# Copy it into accounts/personal.toml, replace the four placeholders
+# (display_name, email, both hosts and the password) and that is a working
+# account at most providers.
+#
+# display_name = "Your Name"
+# email = "you@example.org"
+#
+# [imap]
+# host = "imap.example.org"
+# port = 993
+# username = "you@example.org"
+# password_command = "pass show mail/example.org"
+# tls = "tls"
+#
+# [smtp]
+# host = "smtp.example.org"
+# port = 587
+# username = "you@example.org"
+# password_command = "pass show mail/example.org"
+# tls = "starttls"
+#
+# [sent]
+# mailbox = "Sent"
+#
+# [drafts]
+# mailbox = "Drafts"
+#
+# [trash]
+# mailbox = "Trash"

@@ -1,0 +1,89 @@
+# ───────────────────────────────────────────────────────────────────────────
+# btcx general settings
+#
+# Location: ~/.config/btcx/config.toml
+# (or $XDG_CONFIG_HOME/btcx/config.toml when you set that variable)
+#
+# Everything here is optional. btcx works without this file, and every line
+# below is commented out: btcx is currently using exactly the value shown.
+# To change something, delete the leading "# " from its line and edit it.
+#
+# Accounts are NOT configured here. Each account has its own file in
+# ~/.config/btcx/accounts/ — see accounts/example.toml.example in that
+# directory for a walkthrough.
+# ───────────────────────────────────────────────────────────────────────────
+
+
+# Appearance
+# ==========
+# "system" follows your desktop's light/dark preference. Use "dark" or
+# "light" to force one.
+# theme = "system"
+
+
+# Editor
+# ======
+# The command used by "Edit in external editor" when you write a message.
+# {file} is replaced with the draft's path, passed as ONE argument. If the
+# placeholder is missing, the path is added as the last argument.
+#
+# The command is split like a shell command line but is NOT run through a
+# shell: no pipes, no redirects, no variable expansion, no globbing.
+#
+# Leave it unset and btcx uses $VISUAL, then $EDITOR, then "nvim" from your
+# PATH.
+#
+# Terminal editors need a terminal to run in. Start one and give it the
+# editor as its command, e.g. for the Alacritty terminal:
+# editor = "alacritty -e nvim {file}"
+#
+# Other examples:
+# editor = "alacritty -e nvim {file}"
+# editor = "kitty nvim {file}"
+# editor = "gnome-terminal -- nvim {file}"
+# editor = "foot nvim {file}"
+# editor = "gvim -f {file}"
+
+
+# New mail watching
+# =================
+# Keep accounts open with IMAP IDLE and update the message list the moment
+# new mail arrives. Set to false to poll only when you switch folders
+# (lighter on laptop batteries and flaky servers).
+# watch = true
+
+
+# Remote content in HTML mail — privacy
+# =====================================
+# Most HTML newsletters embed images loaded from the sender's web server.
+# Each load tells the sender that you opened the message, when, and from
+# which IP address — a tracking pixel by another name.
+#
+# true: block them. btcx shows placeholders and you can reveal the images
+#       for one message when you trust it.
+# false: load remote images automatically. Only do this if you accept the
+#        tracking.
+#
+# Attachments referenced inside the message itself (cid: images) are
+# always shown; they never touch the network.
+# block_remote_content = true
+
+
+# Lua scripting
+# =============
+# Directory holding *.lua scripts, run in file-name order. Empty means
+# ~/.config/btcx/scripts/ next to this file. See
+# scripts/example.lua.example in that directory, and docs/SCRIPTING.md in
+# the btcx source tree, for the hooks and the sandbox rules.
+# script_dir = ""
+
+# Master switch for scripting. Set to false to load no scripts at all.
+# script_enabled = true
+
+
+# Logging
+# =======
+# How much btcx writes to its log: "debug", "info", "warn" or "error".
+# "debug" is verbose and useful when something is wrong; it may include
+# mail headers, so do not leave it on.
+# log_level = "info"
