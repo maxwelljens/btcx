@@ -267,6 +267,69 @@ end
 	}
 }
 
+func TestStringRepHugeBounded(t *testing.T) {
+	e, buf := newEngine(t, time.Second, map[string]string{
+		"rep.lua":   `function on_startup() ('x'):rep(2^40) end`,
+		"alive.lua": `function on_startup() btcx.log("info", "alive") end`,
+	})
+	start := time.Now()
+	warns := e.OnStartup()
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("huge rep took %v", elapsed)
+	}
+	if len(warns) != 1 || !strings.Contains(warns[0], "rep.lua") || !strings.Contains(warns[0], "too large") {
+		t.Fatalf("warnings = %v, want one 'result too large' naming rep.lua", warns)
+	}
+	if !strings.Contains(buf.String(), "alive") {
+		t.Fatal("healthy script did not run")
+	}
+	// The runaway script stays disabled; the engine still works.
+	if got := e.OnStartup(); len(got) != 0 {
+		t.Fatalf("second OnStartup: %v", got)
+	}
+}
+
+func TestStringCapsInsidePcall(t *testing.T) {
+	e, _ := newEngine(t, time.Second, map[string]string{"caps.lua": `
+function on_startup()
+  assert(not pcall(string.rep, "ab", 2^28), "huge rep did not fail")
+  assert(string.rep("x", 1000) == string.rep("x", 500) .. string.rep("x", 500))
+  assert(string.rep("ab", 3, "-") == "ab-ab-ab", "separator changed")
+  assert(("z"):rep(3) == "zzz", "method form broken")
+  assert(not pcall(string.format, "%1000000000s", "x"), "huge width did not fail")
+  assert(not pcall(string.format, "%" .. string.rep("x", 70000)), "long format did not fail")
+  assert(string.format("%10s", "x") == string.rep(" ", 9) .. "x", "width 10 changed")
+end
+`})
+	start := time.Now()
+	if warns := e.OnStartup(); len(warns) != 0 {
+		t.Fatalf("OnStartup: %v", warns)
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("caps took %v", elapsed)
+	}
+}
+
+// TestStringFormatMatchesGo pins the wrapper's passthrough to Go's fmt.
+func TestStringFormatMatchesGo(t *testing.T) {
+	cases := []struct{ format, arg, want string }{
+		{"%d", ", 42", fmt.Sprintf("%d", 42)},
+		{"%s", `, "hi"`, fmt.Sprintf("%s", "hi")},
+		{"%q", `, "ab"`, fmt.Sprintf("%q", "ab")},
+		{"%x", ", 255", fmt.Sprintf("%x", 255)},
+		{"%%", "", fmt.Sprintf("%%")},
+		{"%5d", ", 42", fmt.Sprintf("%5d", 42)},
+	}
+	for _, tc := range cases {
+		src := fmt.Sprintf("function on_startup() assert(string.format(%q%s) == %q, %q) end",
+			tc.format, tc.arg, tc.want, tc.format)
+		e, _ := newEngine(t, time.Second, map[string]string{"fmt.lua": src})
+		if warns := e.OnStartup(); len(warns) != 0 {
+			t.Fatalf("%q: %v", tc.format, warns)
+		}
+	}
+}
+
 func TestFailingHookDisablesScript(t *testing.T) {
 	e, buf := newEngine(t, time.Second, map[string]string{
 		"fail.lua": `

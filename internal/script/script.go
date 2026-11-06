@@ -11,6 +11,11 @@
 // because nothing above it is privileged: a script can only damage its own
 // isolated state, which is discarded on error.
 //
+// The string library is capped per state: string.rep fails before allocating
+// a result above 8 MiB, and string.format fails on a format string above
+// 64 KiB or a width/precision above 10000. Everything else in string, table
+// and math allocates only in proportion to arguments already in memory.
+//
 // Scripts talk to btcx through a single global table:
 //
 //	btcx.log(level, msg)  -- level is "debug", "info", "warn" or "error";
@@ -54,10 +59,15 @@
 // wrapping its loops in pcall. The script is disabled and a warning is
 // returned; btcx itself keeps working.
 //
-// shortcut: the budget counts VM instructions, so a single library call such
-// as string.rep("x", 1<<40) runs to completion inside Go and cannot be
-// interrupted; add per-builtin argument caps if scripts stop being
-// user-owned.
+// The budget cannot interrupt a single library call, so the string library
+// is capped before any script runs: string.rep refuses results above 8 MiB
+// and string.format refuses format strings above 64 KiB or with a width or
+// precision above 10000. Those are the only single-call allocators reachable
+// from a script; every other library call allocates in proportion to
+// arguments that are already in memory.
+//
+// shortcut: the caps are per call, so a loop can still fill memory until the
+// budget stops it; tighten them if hooks ever run without a budget.
 package script
 
 import (
@@ -88,6 +98,12 @@ const (
 	maxWarnings = 100
 	// maxLogMessage bounds what a script may push into one log record.
 	maxLogMessage = 8 << 10
+	// maxStringBytes caps what string.rep may build in one call.
+	maxStringBytes = 8 << 20
+	// maxFormatBytes caps the format string string.format accepts.
+	maxFormatBytes = 64 << 10
+	// maxFormatField caps one directive's width or precision.
+	maxFormatField = 10000
 )
 
 // errBudget is reported when a script exhausts its execution budget.
@@ -351,6 +367,7 @@ func (e *Engine) newState(s *script) *lua.State {
 		lua.Require(l, lib.Name, lib.Function, true)
 		l.Pop(1)
 	}
+	hardenString(l)
 	for _, name := range removedGlobals {
 		l.PushNil()
 		l.SetGlobal(name)
@@ -365,6 +382,101 @@ func (e *Engine) newState(s *script) *lua.State {
 	l.SetField(-2, "version")
 	l.SetGlobal("btcx")
 	return l
+}
+
+// hardenString swaps the string library's single-call allocators for capped
+// wrappers. The originals are kept in the registry, which scripts cannot reach.
+func hardenString(l *lua.State) {
+	l.Global("string")
+	for _, lib := range []struct {
+		name string
+		fn   lua.Function
+	}{{"rep", cappedRep}, {"format", cappedFormat}} {
+		l.Field(-1, lib.name)
+		l.SetField(lua.RegistryIndex, "btcx.string."+lib.name)
+		l.PushGoFunction(lib.fn)
+		l.SetField(-2, lib.name)
+	}
+	l.Pop(1)
+}
+
+// cappedRep rejects string.rep results larger than maxStringBytes before the
+// builtin allocates them.
+func cappedRep(l *lua.State) int {
+	if s, ok := l.ToString(1); ok {
+		if n, ok := l.ToInteger(2); ok && n > 0 {
+			sep, _ := l.ToString(3)
+			if len(s)+len(sep) > 0 && n > maxStringBytes {
+				lua.Errorf(l, "string.rep: result too large")
+			}
+			size := int64(len(s)) * int64(n)
+			if n > 1 {
+				size += int64(len(sep)) * int64(n-1)
+			}
+			if size > maxStringBytes {
+				lua.Errorf(l, "string.rep: result too large")
+			}
+		}
+	}
+	return callString(l, "rep")
+}
+
+// cappedFormat rejects format strings that would make the builtin allocate
+// large padding, then defers to it.
+func cappedFormat(l *lua.State) int {
+	if f, ok := l.ToString(1); ok {
+		if len(f) > maxFormatBytes {
+			lua.Errorf(l, "string.format: format too long")
+		}
+		if formatTooWide(f) {
+			lua.Errorf(l, "string.format: width or precision too large")
+		}
+	}
+	return callString(l, "format")
+}
+
+// callString invokes the original library function kept in the registry with
+// the wrapper's arguments.
+func callString(l *lua.State, name string) int {
+	l.Field(lua.RegistryIndex, "btcx.string."+name)
+	args := l.Top() - 1
+	for i := 1; i <= args; i++ {
+		l.PushValue(i)
+	}
+	l.Call(args, 1)
+	return 1
+}
+
+// formatTooWide reports whether f has a directive whose width or precision
+// exceeds maxFormatField.
+func formatTooWide(f string) bool {
+	for i := 0; i < len(f); i++ {
+		if f[i] != '%' {
+			continue
+		}
+		i++
+		for i < len(f) && strings.IndexByte("-+ #0", f[i]) >= 0 {
+			i++
+		}
+		for field := 0; field < 2; field++ {
+			if field == 1 {
+				if i >= len(f) || f[i] != '.' {
+					break
+				}
+				i++
+			}
+			v := 0
+			for ; i < len(f) && '0' <= f[i] && f[i] <= '9'; i++ {
+				if v <= maxFormatField {
+					v = v*10 + int(f[i]-'0')
+				}
+			}
+			if v > maxFormatField {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // luaLog implements btcx.log(level, msg).
