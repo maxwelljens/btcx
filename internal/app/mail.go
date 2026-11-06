@@ -640,35 +640,13 @@ func containsAttr(attributes []string, attr string) bool {
 	return false
 }
 
-// envelopesForUIDs fetches summaries for search hits.
-//
-// shortcut: one request per contiguous UID run, capped at pageSize results; a
-// search returning very sparse hits still costs one round trip per run.
+// envelopesForUIDs fetches summaries for search hits — exactly these UIDs,
+// in one request.
 func envelopesForUIDs(ctx context.Context, cl MailClient, mailbox string, uids []uint32) ([]model.Envelope, error) {
-	sort.Slice(uids, func(i, j int) bool { return uids[i] < uids[j] })
-	if len(uids) > pageSize {
-		uids = uids[len(uids)-pageSize:]
+	if len(uids) == 0 {
+		return nil, nil
 	}
-	var out []model.Envelope
-	var partial error
-	for i := 0; i < len(uids); {
-		j := i
-		for j+1 < len(uids) && uids[j+1] == uids[j]+1 {
-			j++
-		}
-		envs, err := cl.Envelopes(ctx, mailbox, uids[i], j-i+1)
-		if err != nil {
-			var pe *imapx.PartialError
-			if !errors.As(err, &pe) {
-				return nil, fmt.Errorf("envelopes: %w", err)
-			}
-			// The mail is usable; keep collecting and hand the warning up.
-			partial = err
-		}
-		out = append(out, envs...)
-		i = j + 1
-	}
-	return out, partial
+	return cl.EnvelopeDetails(ctx, mailbox, uids)
 }
 
 // safeFilename reduces an untrusted attachment name to a single path element.

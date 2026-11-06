@@ -278,3 +278,43 @@ func TestPartialErrorMessage(t *testing.T) {
 		t.Error("Unwrap missing")
 	}
 }
+
+// TestEnvelopesReturnsNewestWindow locks the newest-N window semantics: the
+// message list must show the newest messages, not the oldest ones from
+// years ago (the bug behind "latest mail is from July 2025").
+func TestEnvelopesReturnsNewestWindow(t *testing.T) {
+	ts := newTestServer(t, TLSImplicit)
+	cl := ts.dial(t, nil)
+	for i := 0; i < 60; i++ {
+		mustAppend(t, cl, "INBOX", rawMessage(fmt.Sprintf("Subject: msg %02d", i+1), "", "body"))
+	}
+
+	envs, err := cl.Envelopes(context.Background(), "INBOX", 1, 10)
+	if err != nil {
+		t.Fatalf("envelopes: %v", err)
+	}
+	if len(envs) != 10 {
+		t.Fatalf("got %d envelopes, want 10", len(envs))
+	}
+	if first, last := envs[0].Ref.UID, envs[len(envs)-1].Ref.UID; first != 51 || last != 60 {
+		t.Errorf("window UIDs = %d..%d, want 51..60 (newest messages)", first, last)
+	}
+
+	// startUID still filters.
+	envs, err = cl.Envelopes(context.Background(), "INBOX", 40, 10)
+	if err != nil {
+		t.Fatalf("envelopes startUID: %v", err)
+	}
+	if len(envs) != 10 || envs[0].Ref.UID != 51 {
+		t.Errorf("startUID=40 window = %d..%d, want 10 msgs ending at 60", len(envs), envs[len(envs)-1].Ref.UID)
+	}
+
+	// Asking for more than exists returns everything.
+	envs, err = cl.Envelopes(context.Background(), "INBOX", 1, 100)
+	if err != nil {
+		t.Fatalf("envelopes all: %v", err)
+	}
+	if len(envs) != 60 || envs[0].Ref.UID != 1 {
+		t.Errorf("all mail: %d envelopes, first UID %d; want 60 starting at 1", len(envs), envs[0].Ref.UID)
+	}
+}

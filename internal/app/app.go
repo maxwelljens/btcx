@@ -64,6 +64,7 @@ const (
 type MailClient interface {
 	Mailboxes(ctx context.Context) ([]model.Mailbox, error)
 	Envelopes(ctx context.Context, mailbox string, startUID uint32, count int) ([]model.Envelope, error)
+	EnvelopeDetails(ctx context.Context, mailbox string, uids []uint32) ([]model.Envelope, error)
 	RawMessage(ctx context.Context, mailbox string, uid uint32) ([]byte, error)
 	SetFlags(ctx context.Context, mailbox string, uid uint32, add, remove model.Flags) error
 	Search(ctx context.Context, mailbox, text string) ([]uint32, error)

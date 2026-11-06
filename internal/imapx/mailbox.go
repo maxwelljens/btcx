@@ -67,10 +67,14 @@ func mailboxFromList(data *imap.ListData) model.Mailbox {
 // Client.envelopeChunk.
 const defaultEnvelopeChunk = 200
 
-// Envelopes fetches summaries for up to count messages with UID >= startUID,
-// in ascending UID order.
+// maxUIDs (defined in imapx.go) bounds the UID discovery pass against
+// hostile servers that could claim absurd mailbox sizes.
+
+// Envelopes returns the newest count messages with UID >= startUID, in
+// ascending UID order. (The caller displays them newest-first.)
 //
-// If the server fails mid-fetch — classically Dovecot answering
+// A single detail fetch covers the window on healthy servers. If the
+// server fails mid-fetch — classically Dovecot answering
 // "* BYE Internal error occurred" while generating one message's
 // BODYSTRUCTURE, severing the connection — the client reconnects and
 // refetches in bounded groups, degrading only the failing groups to "no
@@ -91,16 +95,21 @@ func (c *Client) Envelopes(ctx context.Context, mailbox string, startUID uint32,
 		if err != nil {
 			return err
 		}
-		chunk := c.envelopeChunk
-		if chunk <= 0 {
-			chunk = defaultEnvelopeChunk
+		// Discover which UIDs exist: a lightweight pass that survives
+		// BODYSTRUCTURE crashes and lets us pick the newest window even
+		// in sparse mailboxes.
+		uids, err := c.discoverUIDs(startUID)
+		if err != nil {
+			return err
 		}
-
-		// Fast path: one fetch for the whole range (one round trip on
-		// healthy servers).
-		var set imap.UIDSet
-		set.AddRange(imap.UID(startUID), 0) // n:* - filtered below for empty tail
-		envs, err := c.fetchEnvelopes(mailbox, sel.UIDValidity, set, startUID, count, true)
+		if len(uids) == 0 {
+			return nil
+		}
+		window := uids
+		if len(window) > count {
+			window = window[len(window)-count:]
+		}
+		envs, err := c.fetchEnvelopes(mailbox, sel.UIDValidity, uidSetFrom(window), window[0], len(window), true)
 		if err == nil {
 			out = envs
 			return nil
@@ -108,8 +117,7 @@ func (c *Client) Envelopes(ctx context.Context, mailbox string, startUID uint32,
 		cause = err
 
 		// The connection died mid-fetch or the server erred. Reconnect and
-		// recover: discover the UIDs cheaply (plain UID fetches survive
-		// BODYSTRUCTURE crashes), then fetch detail in bounded groups.
+		// recover with bounded groups.
 		if rerr := c.reconnectLocked(ctx); rerr != nil {
 			return fmt.Errorf("fetch failed (%w) and reconnect failed: %v", rerr, err)
 		}
@@ -117,33 +125,8 @@ func (c *Client) Envelopes(ctx context.Context, mailbox string, startUID uint32,
 		if err != nil {
 			return err
 		}
-		uids, err := c.discoverUIDs(startUID, count)
-		if err != nil {
-			return fmt.Errorf("fetch failed (%v) and uid discovery failed: %w", cause, err)
-		}
-		for i := 0; i < len(uids); i += chunk {
-			j := min(i+chunk, len(uids))
-			var gset imap.UIDSet
-			gset.AddRange(imap.UID(uids[i]), imap.UID(uids[j-1]))
-			envs, err := c.fetchEnvelopes(mailbox, sel.UIDValidity, gset, uids[i], j-i, true)
-			if err != nil {
-				// This group is what kills the connection. Reconnect and
-				// refetch it without body structures.
-				if rerr := c.reconnectLocked(ctx); rerr != nil {
-					return fmt.Errorf("group %d..%d failed (%w) and reconnect failed: %v", uids[i], uids[j-1], rerr, err)
-				}
-				if _, err := c.selectMailbox(mailbox); err != nil {
-					return err
-				}
-				envs, err = c.fetchEnvelopes(mailbox, sel.UIDValidity, gset, uids[i], j-i, false)
-				if err != nil {
-					return fmt.Errorf("group %d..%d failed even without body structure: %w", uids[i], uids[j-1], err)
-				}
-				degraded++
-			}
-			out = append(out, envs...)
-		}
-		return nil
+		out, degraded, err = c.groupedDetailsLocked(mailbox, sel, window)
+		return err
 	})
 	if err != nil {
 		return nil, fmt.Errorf("imapx: envelopes %q: %w", mailbox, err)
@@ -153,6 +136,84 @@ func (c *Client) Envelopes(ctx context.Context, mailbox string, startUID uint32,
 		return out, &PartialError{Groups: degraded, Err: cause}
 	}
 	return out, nil
+}
+
+// EnvelopeDetails returns details for exactly the given UIDs, ascending and
+// deduplicated, with the same degraded-fetch behaviour as Envelopes.
+func (c *Client) EnvelopeDetails(ctx context.Context, mailbox string, uids []uint32) ([]model.Envelope, error) {
+	if len(uids) == 0 {
+		return nil, nil
+	}
+	sorted := append([]uint32(nil), uids...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
+	var out []model.Envelope
+	var degraded int
+	var cause error
+	err := c.do(ctx, func() error {
+		sel, err := c.selectMailbox(mailbox)
+		if err != nil {
+			return err
+		}
+		envs, err := c.fetchEnvelopes(mailbox, sel.UIDValidity, uidSetFrom(sorted), sorted[0], len(sorted), true)
+		if err == nil {
+			out = envs
+			return nil
+		}
+		cause = err
+		if rerr := c.reconnectLocked(ctx); rerr != nil {
+			return fmt.Errorf("fetch failed (%w) and reconnect failed: %v", rerr, err)
+		}
+		sel, err = c.selectMailbox(mailbox)
+		if err != nil {
+			return err
+		}
+		out, degraded, err = c.groupedDetailsLocked(mailbox, sel, sorted)
+		return err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("imapx: envelope details %q: %w", mailbox, err)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Ref.UID < out[j].Ref.UID })
+	if degraded > 0 {
+		return out, &PartialError{Groups: degraded, Err: cause}
+	}
+	return out, nil
+}
+
+// groupedDetailsLocked fetches details for uids in bounded groups,
+// reconnecting and retrying each failing group without BODYSTRUCTURE. The
+// caller must hold c.mu.
+func (c *Client) groupedDetailsLocked(mailbox string, sel *imap.SelectData, uids []uint32) ([]model.Envelope, int, error) {
+	chunk := c.envelopeChunk
+	if chunk <= 0 {
+		chunk = defaultEnvelopeChunk
+	}
+	var out []model.Envelope
+	var degraded int
+	for i := 0; i < len(uids); i += chunk {
+		j := min(i+chunk, len(uids))
+		group := uids[i:j]
+		var gset imap.UIDSet
+		gset.AddRange(imap.UID(group[0]), imap.UID(group[len(group)-1]))
+		envs, err := c.fetchEnvelopes(mailbox, sel.UIDValidity, gset, group[0], len(group), true)
+		if err != nil {
+			// This group is what kills the connection. Reconnect and
+			// refetch it without body structures.
+			if rerr := c.reconnectLocked(context.Background()); rerr != nil {
+				return nil, degraded, fmt.Errorf("group %d..%d failed (%w) and reconnect failed: %v", group[0], group[len(group)-1], rerr, err)
+			}
+			if _, err := c.selectMailbox(mailbox); err != nil {
+				return nil, degraded, err
+			}
+			envs, err = c.fetchEnvelopes(mailbox, sel.UIDValidity, gset, group[0], len(group), false)
+			if err != nil {
+				return nil, degraded, fmt.Errorf("group %d..%d failed even without body structure: %w", group[0], group[len(group)-1], err)
+			}
+			degraded++
+		}
+		out = append(out, envs...)
+	}
+	return out, degraded, nil
 }
 
 // fetchEnvelopes fetches envelope details for the messages in set. minUID
@@ -190,10 +251,10 @@ func (c *Client) fetchEnvelopes(mailbox string, uidValidity uint32, set imap.UID
 	return out, nil
 }
 
-// discoverUIDs returns up to count existing UIDs >= startUID in ascending
-// order, using a lightweight UID-only fetch that survives servers which
-// crash on body structures.
-func (c *Client) discoverUIDs(startUID uint32, count int) ([]uint32, error) {
+// discoverUIDs returns all existing UIDs >= startUID in ascending order,
+// using a lightweight UID-only fetch that survives servers which crash on
+// body structures.
+func (c *Client) discoverUIDs(startUID uint32) ([]uint32, error) {
 	var set imap.UIDSet
 	set.AddRange(imap.UID(startUID), 0)
 	cmd := c.c.Fetch(set, &imap.FetchOptions{UID: true})
@@ -208,14 +269,29 @@ func (c *Client) discoverUIDs(startUID uint32, count int) ([]uint32, error) {
 			continue
 		}
 		out = append(out, uint32(buf.UID))
-		if len(out) >= count {
-			break
+		if len(out) > maxUIDs {
+			cmd.Close()
+			return nil, fmt.Errorf("imapx: mailbox has more than %d messages; refusing to window it", maxUIDs)
 		}
 	}
 	if err := cmd.Close(); err != nil {
 		return nil, err
 	}
 	return out, nil
+}
+
+// uidSetFrom compresses sorted UIDs into a UIDSet of consecutive ranges.
+func uidSetFrom(uids []uint32) imap.UIDSet {
+	var set imap.UIDSet
+	for i := 0; i < len(uids); {
+		j := i
+		for j+1 < len(uids) && uids[j+1] == uids[j]+1 {
+			j++
+		}
+		set.AddRange(imap.UID(uids[i]), imap.UID(uids[j]))
+		i = j + 1
+	}
+	return set
 }
 
 // RawMessage fetches a complete message without setting \Seen.

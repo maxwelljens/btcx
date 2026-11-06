@@ -212,8 +212,31 @@ func (f *fakeClient) Envelopes(ctx context.Context, mailbox string, startUID uin
 			continue
 		}
 		out = append(out, e)
-		if count > 0 && len(out) >= count {
-			break
+	}
+	// Newest `count`, mirroring the real client's window semantics.
+	if count > 0 && len(out) > count {
+		out = out[len(out)-count:]
+	}
+	if f.s.envelopesErr != nil && len(out) > 0 {
+		return out, f.s.envelopesErr
+	}
+	return out, nil
+}
+
+func (f *fakeClient) EnvelopeDetails(ctx context.Context, mailbox string, uids []uint32) ([]model.Envelope, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	f.s.mu.Lock()
+	defer f.s.mu.Unlock()
+	want := make(map[uint32]bool, len(uids))
+	for _, uid := range uids {
+		want[uid] = true
+	}
+	var out []model.Envelope
+	for _, e := range f.s.envelopes[mailbox] {
+		if want[e.Ref.UID] {
+			out = append(out, e)
 		}
 	}
 	if f.s.envelopesErr != nil && len(out) > 0 {

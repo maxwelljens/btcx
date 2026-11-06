@@ -102,7 +102,18 @@ func TestRealServer(t *testing.T) {
 			if len(envs) == 0 {
 				t.Fatalf("envelopes INBOX count=%d: no mail loaded", n)
 			}
-			t.Logf("count=%d got=%d in %s", n, len(envs), time.Since(start).Round(time.Millisecond))
+			// Sanity check for active mailboxes: the newest message must
+			// be recent. A stale window (oldest-message-first) shows up
+			// here immediately.
+			newest := envs[len(envs)-1].Date
+			oldest := envs[0].Date
+			t.Logf("count=%d got=%d oldest=%s newest=%s in %s",
+				n, len(envs), oldest.Format("2006-01-02"), newest.Format("2006-01-02"),
+				time.Since(start).Round(time.Millisecond))
+			if n > 10 && newest.Before(time.Now().AddDate(0, -2, 0)) {
+				t.Errorf("newest message is from %s — the list is showing old mail, not the newest",
+					newest.Format("2006-01-02"))
+			}
 		})
 	}
 }
