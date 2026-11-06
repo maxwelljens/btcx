@@ -84,6 +84,7 @@ func (c *Controller) handleNewMail(ctx context.Context, st *accountState, uids [
 	}
 	sort.Slice(uids, func(i, j int) bool { return uids[i] < uids[j] })
 	envs, err := envelopesForUIDs(ctx, cl, inboxName, uids)
+	envs, err = c.envelopes(st, envs, err)
 	if err != nil {
 		c.dropClient(st)
 		c.fail(fmt.Errorf("app: new mail %s: %w", st.cfg.Name, err))

@@ -11,6 +11,7 @@ import (
 
 	"btcx/internal/config"
 	"btcx/internal/contract"
+	"btcx/internal/imapx"
 	"btcx/internal/mailparse"
 	"btcx/internal/model"
 	"btcx/internal/render"
@@ -56,6 +57,7 @@ func (c *Controller) loadFolder(ctx context.Context, st *accountState, folder st
 		return err
 	}
 	envs, err := cl.Envelopes(ctx, folder, 1, pageSize)
+	envs, err = c.envelopes(st, envs, err)
 	if err != nil {
 		c.dropClient(st)
 		return fmt.Errorf("load %q: %w", folder, err)
@@ -65,6 +67,20 @@ func (c *Controller) loadFolder(ctx context.Context, st *accountState, folder st
 	c.events.OnMessages(st.cfg.Name, folder, rows)
 	c.events.OnFolders(st.cfg.Name, c.folderInfos(st))
 	return nil
+}
+
+// envelopes normalizes an Envelopes result: a *imapx.PartialError means the
+// mail is complete but the server failed to describe some message groups —
+// a server-side failure, e.g. Dovecot answering "* BYE Internal error
+// occurred" while generating one message's BODYSTRUCTURE. Surface the
+// problem once and use the rows; the connection is healthy again.
+func (c *Controller) envelopes(st *accountState, envs []model.Envelope, err error) ([]model.Envelope, error) {
+	var pe *imapx.PartialError
+	if errors.As(err, &pe) {
+		c.fail(fmt.Errorf("account %s: %s", st.cfg.Name, pe))
+		return envs, nil
+	}
+	return envs, err
 }
 
 // SelectFolder loads a folder's message list.
@@ -120,6 +136,7 @@ func (c *Controller) Search(account, folder, query string) {
 			return
 		}
 		envs, err := envelopesForUIDs(ctx, cl, folder, uids)
+		envs, err = c.envelopes(st, envs, err)
 		if err != nil {
 			c.dropClient(st)
 			c.fail(fmt.Errorf("app: search %s: %w", account, err))
@@ -633,6 +650,7 @@ func envelopesForUIDs(ctx context.Context, cl MailClient, mailbox string, uids [
 		uids = uids[len(uids)-pageSize:]
 	}
 	var out []model.Envelope
+	var partial error
 	for i := 0; i < len(uids); {
 		j := i
 		for j+1 < len(uids) && uids[j+1] == uids[j]+1 {
@@ -640,12 +658,17 @@ func envelopesForUIDs(ctx context.Context, cl MailClient, mailbox string, uids [
 		}
 		envs, err := cl.Envelopes(ctx, mailbox, uids[i], j-i+1)
 		if err != nil {
-			return nil, fmt.Errorf("envelopes: %w", err)
+			var pe *imapx.PartialError
+			if !errors.As(err, &pe) {
+				return nil, fmt.Errorf("envelopes: %w", err)
+			}
+			// The mail is usable; keep collecting and hand the warning up.
+			partial = err
 		}
 		out = append(out, envs...)
 		i = j + 1
 	}
-	return out, nil
+	return out, partial
 }
 
 // safeFilename reduces an untrusted attachment name to a single path element.

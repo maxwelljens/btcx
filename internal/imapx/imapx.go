@@ -83,16 +83,38 @@ type DialConfig struct {
 // takes exclusive ownership of the connection for its whole duration; every
 // other command then fails with ErrBusy.
 type Client struct {
+	cfg    DialConfig // normalised; kept for reconnects
 	c      *imapclient.Client
 	notify chan struct{} // EXISTS notifications, coalesced
 
 	// maxMessageBytes is the RawMessage cap; fixed after Dial.
 	maxMessageBytes int64
 
+	// envelopeChunk bounds how many messages one envelope fetch covers, so
+	// a server crashing on one message degrades one group, not the mailbox.
+	// Tests shrink it; fixed after Dial.
+	envelopeChunk int
+
 	mu       sync.Mutex // serializes commands
 	watchMu  sync.Mutex // guards watching
 	watching bool
 }
+
+// PartialError reports that Envelopes returned complete mail but that the
+// server failed while producing detail for some message groups — typically
+// a server-side crash while generating a BODYSTRUCTURE (Dovecot answers
+// "* BYE Internal error occurred" and severs the connection). Those groups
+// are loaded without attachment information; everything else is intact.
+type PartialError struct {
+	Groups int   // number of message groups loaded without detail
+	Err    error // the underlying server failure
+}
+
+func (e *PartialError) Error() string {
+	return fmt.Sprintf("imapx: server failed to describe %d message group(s) (server-side error); mail is complete but some messages show no attachment info: %v", e.Groups, e.Err)
+}
+
+func (e *PartialError) Unwrap() error { return e.Err }
 
 // Dial connects, upgrades the transport and authenticates.
 //
@@ -101,45 +123,65 @@ type Client struct {
 // command closes the connection, because an interrupted IMAP dialogue cannot
 // be resumed safely.
 func Dial(ctx context.Context, cfg DialConfig) (*Client, error) {
+	cfg, err := cfg.normalized()
+	if err != nil {
+		return nil, err
+	}
+	cl := &Client{
+		cfg:             cfg,
+		notify:          make(chan struct{}, 1),
+		maxMessageBytes: DefaultMaxMessageBytes,
+		envelopeChunk:   defaultEnvelopeChunk,
+	}
+	if err := cl.connect(ctx); err != nil {
+		return nil, err
+	}
+	return cl, nil
+}
+
+// normalized validates cfg and fills in port and timeout defaults.
+func (cfg DialConfig) normalized() (DialConfig, error) {
 	if cfg.Host == "" {
-		return nil, errors.New("imapx: dial: empty host")
+		return cfg, errors.New("imapx: dial: empty host")
 	}
 	switch cfg.TLS {
 	case TLSImplicit, TLSStartTLS:
 	default:
-		return nil, fmt.Errorf("imapx: dial: unsupported TLS mode %d", cfg.TLS)
+		return cfg, fmt.Errorf("imapx: dial: unsupported TLS mode %d", cfg.TLS)
 	}
-	port := cfg.Port
-	if port == 0 {
+	if cfg.Port == 0 {
 		if cfg.TLS == TLSImplicit {
-			port = defaultImplicitPort
+			cfg.Port = defaultImplicitPort
 		} else {
-			port = defaultStartTLSPort
+			cfg.Port = defaultStartTLSPort
 		}
 	}
-	if port < 0 || port > 65535 {
-		return nil, fmt.Errorf("imapx: dial: invalid port %d", port)
+	if cfg.Port < 0 || cfg.Port > 65535 {
+		return cfg, fmt.Errorf("imapx: dial: invalid port %d", cfg.Port)
 	}
+	if cfg.DialTimeout <= 0 {
+		cfg.DialTimeout = defaultDialTimeout
+	}
+	return cfg, nil
+}
+
+// connect dials, upgrades the transport and logs in, replacing c.c.
+// The caller must hold c.mu or otherwise own the client exclusively.
+func (c *Client) connect(ctx context.Context) error {
+	cfg := c.cfg
 	timeout := cfg.DialTimeout
-	if timeout <= 0 {
-		timeout = defaultDialTimeout
-	}
 	// Every step up to LOGIN runs under this deadline: a server that accepts
 	// the socket and then stalls must not wedge the serialized client.
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	tlsConf, err := cfg.tlsConfig()
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	addr := net.JoinHostPort(cfg.Host, fmt.Sprint(port))
+	addr := net.JoinHostPort(cfg.Host, fmt.Sprint(cfg.Port))
 	dialer := &net.Dialer{Timeout: timeout}
 
-	cl := &Client{
-		notify:          make(chan struct{}, 1),
-		maxMessageBytes: DefaultMaxMessageBytes,
-	}
 	opts := &imapclient.Options{
 		TLSConfig:   tlsConf,
 		Dialer:      dialer,
@@ -149,7 +191,7 @@ func Dial(ctx context.Context, cfg DialConfig) (*Client, error) {
 				// Runs on the decoder goroutine: must never block.
 				if data.NumMessages != nil {
 					select {
-					case cl.notify <- struct{}{}:
+					case c.notify <- struct{}{}:
 					default:
 					}
 				}
@@ -164,7 +206,7 @@ func Dial(ctx context.Context, cfg DialConfig) (*Client, error) {
 	case TLSImplicit:
 		raw, err := dialer.DialContext(ctx, "tcp", addr)
 		if err != nil {
-			return nil, fmt.Errorf("imapx: dial %s: %w", addr, err)
+			return fmt.Errorf("imapx: dial %s: %w", addr, err)
 		}
 		// Belt and braces: bound the socket too, for any library path that
 		// blocks without observing ctx.
@@ -172,14 +214,14 @@ func Dial(ctx context.Context, cfg DialConfig) (*Client, error) {
 		tlsConn := tls.Client(raw, tlsConf)
 		if err := tlsConn.HandshakeContext(ctx); err != nil {
 			raw.Close()
-			return nil, fmt.Errorf("imapx: tls handshake %s: %w", addr, err)
+			return fmt.Errorf("imapx: tls handshake %s: %w", addr, err)
 		}
 		conn = tlsConn
-		cl.c = imapclient.New(tlsConn, opts)
+		c.c = imapclient.New(tlsConn, opts)
 	case TLSStartTLS:
 		conn, err = dialer.DialContext(ctx, "tcp", addr)
 		if err != nil {
-			return nil, fmt.Errorf("imapx: dial %s: %w", addr, err)
+			return fmt.Errorf("imapx: dial %s: %w", addr, err)
 		}
 		_ = conn.SetDeadline(time.Now().Add(timeout))
 		var ic *imapclient.Client
@@ -191,20 +233,29 @@ func Dial(ctx context.Context, cfg DialConfig) (*Client, error) {
 			return err
 		}); err != nil {
 			conn.Close()
-			return nil, fmt.Errorf("imapx: starttls %s: %w", addr, err)
+			return fmt.Errorf("imapx: starttls %s: %w", addr, err)
 		}
-		cl.c = ic
+		c.c = ic
 	}
 
-	if err := waitCtx(ctx, func() { cl.c.Close() }, func() error {
-		return cl.c.Login(cfg.Username, cfg.Password).Wait()
+	if err := waitCtx(ctx, func() { c.c.Close() }, func() error {
+		return c.c.Login(cfg.Username, cfg.Password).Wait()
 	}); err != nil {
-		cl.c.Close()
-		return nil, fmt.Errorf("imapx: login %s as %q: %w", addr, cfg.Username, err)
+		c.c.Close()
+		return fmt.Errorf("imapx: login %s as %q: %w", addr, cfg.Username, err)
 	}
 	// The session is bounded per command, not by the dial timeout.
 	_ = conn.SetDeadline(time.Time{})
-	return cl, nil
+	return nil
+}
+
+// reconnectLocked replaces a dead connection with a fresh session. The
+// caller must hold c.mu.
+func (c *Client) reconnectLocked(ctx context.Context) error {
+	if c.c != nil {
+		_ = c.c.Close()
+	}
+	return c.connect(ctx)
 }
 
 // Close drops the connection immediately.

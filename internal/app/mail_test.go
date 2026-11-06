@@ -1,11 +1,14 @@
 package app
 
 import (
+	"context"
+	"errors"
 	"os"
 	"strings"
 	"testing"
 	"time"
 
+	"btcx/internal/imapx"
 	"btcx/internal/model"
 )
 
@@ -413,4 +416,36 @@ func TestSearchLeavesFolderCountsAlone(t *testing.T) {
 		tot, _ := inbox()
 		return len(ev.messageRows("alice", "INBOX")) == 6 && tot == 6
 	})
+}
+
+// TestLoadFolderDegradesGracefully locks the contract for broken servers:
+// when Envelopes returns mail alongside an *imapx.PartialError (the server
+// crashed mid-fetch — e.g. Dovecot answering "BYE Internal error occurred"
+// on one message's BODYSTRUCTURE), the mail must load and the problem must
+// be reported, and the healed connection must be kept.
+func TestLoadFolderDegradesGracefully(t *testing.T) {
+	srv := newFakeServer()
+	srv.addBox("INBOX")
+	srv.seed("INBOX", 20)
+	srv.envelopesErr = &imapx.PartialError{Groups: 1, Err: errors.New("BYE Internal error occurred")}
+
+	cfg := testConfig(t, testAccount("alice"))
+	c, ev, _ := newTestController(t, cfg, srv)
+
+	st := c.state("alice")
+	if err := c.loadFolder(context.Background(), st, "INBOX"); err != nil {
+		t.Fatalf("loadFolder: %v (mail must load despite the server failure)", err)
+	}
+	if rows := ev.messageRows("alice", "INBOX"); len(rows) != 20 {
+		t.Fatalf("rows = %d, want 20", len(rows))
+	}
+	if len(ev.errs) == 0 {
+		t.Fatal("degradation was not reported to the user")
+	}
+	if msg := ev.errs[0].Error(); !strings.Contains(msg, "attachment") {
+		t.Errorf("unhelpful warning: %q", msg)
+	}
+	if n := srv.dialCount(); n != 1 {
+		t.Errorf("dials = %d, want 1 (healed connection must be kept)", n)
+	}
 }

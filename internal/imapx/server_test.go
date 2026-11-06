@@ -15,6 +15,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -36,6 +37,25 @@ type testServer struct {
 	port    int
 	certPEM []byte
 	user    *imapmemserver.User
+
+	// kill, when set, is consulted with every client command line; a true
+	// return makes the connection die mid-dialogue like a crashing server.
+	killMu sync.Mutex
+	kill   func(line string) bool
+}
+
+// setKill installs (or clears) the command-line kill predicate.
+func (ts *testServer) setKill(fn func(string) bool) {
+	ts.killMu.Lock()
+	ts.kill = fn
+	ts.killMu.Unlock()
+}
+
+func (ts *testServer) observeLine(line string) bool {
+	ts.killMu.Lock()
+	fn := ts.kill
+	ts.killMu.Unlock()
+	return fn != nil && fn(line)
 }
 
 func newTestServer(t *testing.T, mode TLSMode) *testServer {
@@ -91,16 +111,21 @@ func newTestServer(t *testing.T, mode TLSMode) *testServer {
 		})
 	}
 
-	srv := imapserver.New(opts)
-	go func() { _ = srv.Serve(ln) }()
-	t.Cleanup(func() { _ = srv.Close() })
-
-	return &testServer{
+	ts := &testServer{
 		mode:    mode,
 		port:    ln.Addr().(*net.TCPAddr).Port,
 		certPEM: certPEM,
 		user:    user,
 	}
+	// Sniff decrypted client commands so tests can simulate a server that
+	// dies mid-dialogue (see degrade_test.go).
+	sniped := &snipeListener{Listener: ln, observe: ts.observeLine}
+
+	srv := imapserver.New(opts)
+	go func() { _ = srv.Serve(sniped) }()
+	t.Cleanup(func() { _ = srv.Close() })
+
+	return ts
 }
 
 // config returns a base configuration with verification disabled so tests can

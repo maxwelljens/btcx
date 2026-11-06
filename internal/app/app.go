@@ -8,13 +8,15 @@
 // exclusively through contract.Events, which may be called from any goroutine.
 // All mutable state is guarded by Controller.mu.
 //
-// The two seams a fake implements in tests are Connector (opening
-// connections, delivering mail) and MailClient (one IMAP session). The real
+// The seams a fake implements in tests are Connector (opening connections,
+// delivering mail), MailClient (one IMAP session) and the verifyIMAP and
+// verifySMTP fields (VerifyAccount's connection checks). The real
 // implementation of Connector lives in connector.go.
 package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -138,6 +140,18 @@ type Controller struct {
 
 	ctx    context.Context
 	cancel context.CancelFunc
+	// runCtx is the lifetime of one connect generation: Reload cancels it to
+	// stop watchers and in-flight commands, then installs a fresh one.
+	runCtx    context.Context
+	runCancel context.CancelFunc
+
+	// verifyIMAP and verifySMTP are the connection checks VerifyAccount runs.
+	// They are fields so tests can replace them and stay off the network.
+	verifyIMAP func(context.Context, config.Account, string) contract.ServerCheck
+	verifySMTP func(context.Context, config.Account, string) contract.ServerCheck
+
+	// reloadMu serializes configuration reloads.
+	reloadMu sync.Mutex
 
 	mu        sync.Mutex
 	accounts  map[string]*accountState
@@ -184,6 +198,7 @@ func (noopEvents) OnMessageChanged(contract.MessageRow)             {}
 func (noopEvents) OnNewMail(string, contract.MessageRow)            {}
 func (noopEvents) OnMessageOpened(contract.MessageView)             {}
 func (noopEvents) OnSendResult(bool, string)                        {}
+func (noopEvents) OnVerifyResult(contract.VerifyResult)             {}
 func (noopEvents) OnExternalEditDone(contract.EditRequestID, contract.ComposeDraft, error) {
 }
 
@@ -205,6 +220,7 @@ func New(cfg *config.Config, events contract.Events, logger *slog.Logger, connec
 		connector = realConnector{log: logger}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
+	runCtx, runCancel := context.WithCancel(ctx)
 	c := &Controller{
 		cfg:         cfg,
 		events:      events,
@@ -213,10 +229,14 @@ func New(cfg *config.Config, events contract.Events, logger *slog.Logger, connec
 		http:        newHTTPClient(),
 		ctx:         ctx,
 		cancel:      cancel,
+		runCtx:      runCtx,
+		runCancel:   runCancel,
 		accounts:    make(map[string]*accountState, len(cfg.Accounts)),
 		messages:    make(map[cacheKey]*cachedMessage),
 		cacheBudget: maxCacheBytes,
 	}
+	c.verifyIMAP = c.checkIMAP
+	c.verifySMTP = c.checkSMTP
 	for _, a := range cfg.Accounts {
 		c.accounts[a.Name] = &accountState{cfg: a, counts: map[string]folderCount{}}
 		c.order = append(c.order, a.Name)
@@ -422,8 +442,9 @@ func (c *Controller) engine() *script.Engine {
 	return c.scripts
 }
 
-// goRun runs fn on a controller goroutine. Work requested after Shutdown is
-// dropped, and Shutdown waits for everything accepted here.
+// goRun runs fn on a controller goroutine of the current configuration
+// generation. Work requested after Shutdown is dropped, and Shutdown waits for
+// everything accepted here.
 func (c *Controller) goRun(fn func(context.Context)) {
 	c.mu.Lock()
 	if c.closed {
@@ -431,7 +452,7 @@ func (c *Controller) goRun(fn func(context.Context)) {
 		return
 	}
 	c.wg.Add(1)
-	ctx := c.ctx
+	ctx := c.runCtx
 	c.mu.Unlock()
 	go func() {
 		defer c.wg.Done()
@@ -445,13 +466,20 @@ func (c *Controller) fail(err error) {
 	if err == nil {
 		return
 	}
+	if errors.Is(err, context.Canceled) {
+		// A reload or shutdown cancelled the work; not a user-visible failure.
+		c.log.Debug("app: cancelled", "err", err)
+		return
+	}
 	msg := err.Error()
 	c.mu.Lock()
 	suppress := msg == c.lastErr && time.Since(c.lastErrAt) < errorDedup
 	closed := c.closed
 	c.lastErr, c.lastErrAt = msg, time.Now()
 	c.mu.Unlock()
-	c.log.Warn("app: " + msg)
+	// Errors carry their own context (including the "app: " prefix where
+	// relevant); the log line must not add another one.
+	c.log.Warn(msg)
 	if closed || suppress {
 		return
 	}
