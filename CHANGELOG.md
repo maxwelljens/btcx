@@ -46,6 +46,12 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Security
 
+- Robustness against broken servers: a server that crashes mid-fetch while
+  generating one message's `BODYSTRUCTURE` (observed with Dovecot answering
+  `* BYE Internal error occurred`) no longer bricks the mailbox — envelopes
+  are refetched in bounded groups after a reconnect, degrading only the
+  affected messages to "no attachment info" and reporting the degradation
+  honestly, instead of failing the whole load.
 - Remote-image fetches refuse non-public addresses (loopback, RFC 1918,
   CGNAT, link-local/cloud-metadata, unique-local, benchmarking, reserved,
   NAT64), validate the exact resolved IP at dial time (no DNS-rebinding

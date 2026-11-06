@@ -196,6 +196,11 @@ picked up by `Reload` without a restart.
   sanitize -> render assertions (no script/remote content survives).
 - **UI**: keep logic in `app/` so it is unit-testable; `ui/` gets smoke
   tests that are skipped when no display is available.
+- **Real-server probe** (`internal/imapx/realserver_test.go`): opt-in
+  (`BTCX_REAL_IMAP=1`) reproduction against a real account for diagnosing
+  "no email loads" style bug reports; skipped by default. Protocol-level
+  server failures (mid-fetch `BYE`, crashes) are reproduced hermetically by
+  the sniper listener in `degrade_test.go`.
 
 ## Git conventions
 
