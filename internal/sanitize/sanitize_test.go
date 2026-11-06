@@ -249,16 +249,27 @@ func TestReferencesRemoteContent(t *testing.T) {
 		in   string
 		want bool
 	}{
+		// True: images the sanitizer withholds (the bar must offer them).
 		{"remote img", `<img src="https://tracker.example/p.gif">`, true},
 		{"mixed case", `<IMG SRC="HTTPS://tracker.example/p.gif">`, true},
-		{"scheme with tab", "<img src=\"ht\ttp://tracker.example/p.gif\">", true},
-		{"body background", `<body background="http://tracker.example/b.gif">`, true},
-		{"style attribute", `<p style="background:url(https://tracker.example/x.png)">x</p>`, true},
-		{"style element", `<style>@import url(//cdn.example/x.css);</style>`, true},
-		{"link href", `<link rel="stylesheet" href="https://cdn.example/x.css">`, true},
-		{"protocol relative", `<img src="//tracker.example/p.gif">`, true},
+		{"lazy data-src", `<img src="" data-src="https://tracker.example/lazy.png">`, true},
+		{"lazy spacer", `<img src="data:image/gif;base64,R0lGOD" data-original="https://tracker.example/p.png">`, true},
+		{"srcset", `<img srcset="https://tracker.example/1x.png 1x, https://tracker.example/2x.png 2x">`, true},
+		{"picture source", `<picture><source srcset="https://tracker.example/w.avif"><img src="https://tracker.example/f.png"></picture>`, true},
+		// False: either no remote images, or references the sanitizer strips
+		// entirely (btcx cannot re-offer what it does not keep — showing a
+		// load button for these would lie).
+		// Stage 1 removes these URLs entirely (invalid protocol-relative,
+		// control-smuggled scheme): nothing is withheld, so no bar may
+		// promise to load them.
+		{"scheme with tab", "<img src=\"ht\ttp://tracker.example/p.gif\">", false},
+		{"protocol relative", `<img src="//tracker.example/p.gif">`, false},
 		{"cid image", `<img src="cid:part1">`, false},
-		{"href link", `<a href="https://example.com">x</a>`, true},
+		{"href link", `<a href="https://example.com">x</a>`, false},
+		{"link element", `<link rel="stylesheet" href="https://cdn.example/x.css">`, false},
+		{"style attribute", `<p style="background:url(https://tracker.example/x.png)">x</p>`, false},
+		{"style element", `<style>@import url(//cdn.example/x.css);</style>`, false},
+		{"body background", `<body background="http://tracker.example/b.gif">`, false},
 		{"plain text", `see https://example.com`, false},
 		{"empty", ``, false},
 	}
@@ -286,6 +297,53 @@ func TestInitialismsRemoved(t *testing.T) {
 			strings.Contains(got, "<center") || strings.Contains(got, "<font") ||
 			strings.Contains(got, "<canvas") {
 			t.Errorf("HTML(%q) = %q, kept a disallowed element", in, got)
+		}
+	}
+}
+
+// TestImageWithholdingInvariant locks the product contract behind the
+// remote-content bar: the detector and the sanitizer must never disagree —
+// any image the sanitizer withholds (data-blocked-src) must be offered by
+// the detector, and vice versa. A divergence is exactly how users end up
+// with hidden images and no way to show them.
+func TestImageWithholdingInvariant(t *testing.T) {
+	fixtures := map[string]string{
+		"classic remote":      `<img src="https://a.example/p.png">`,
+		"protocol relative":   `<img src="//a.example/p.png">`,
+		"tab smuggle":         `<img src="ht\ttp://a.example/p.png">`,
+		"lazy data-src":       `<img src="" data-src="https://a.example/p.png">`,
+		"lazy spacer":         `<img src="data:image/gif;base64,R0lGOD" data-src="https://a.example/p.png">`,
+		"lazy original":       `<img data-original="https://a.example/p.png">`,
+		"srcset":              `<img srcset="https://a.example/1x.png 1x, https://a.example/2x.png 2x" src="">`,
+		"picture":             `<picture><source srcset="https://a.example/w.avif"><img src="https://a.example/f.png"></picture>`,
+		"picture source only": `<picture><source srcset="https://a.example/w.avif"></picture>`,
+		"lazy on plain img":   `<img data-lazy-src="https://a.example/x.png">`,
+		"background attr":     `<body background="https://a.example/b.gif">`,
+		"style css":           `<p style="background:url(https://a.example/x.png)">`,
+		"links only":          `<a href="https://x.example">x</a>`,
+		"cid":                 `<img src="cid:x">`,
+		"plain":               `<p>hello</p>`,
+	}
+	for name, in := range fixtures {
+		blocks := strings.Contains(HTML(in), `data-blocked-src="`)
+		if got := ReferencesRemoteContent(in); got != blocks {
+			t.Errorf("%s: detector=%v but sanitizer blocks=%v (must agree)\n html=%s", name, got, blocks, HTML(in))
+		}
+	}
+
+	// The cases from the user report: images must actually be withheld AND
+	// offered, never silently hidden.
+	mustOffer := []string{
+		`<img src="" data-src="https://a.example/p.png">`,
+		`<img src="data:image/gif;base64,R0lGOD" data-original="https://a.example/p.png">`,
+		`<img srcset="https://a.example/1x.png 1x, https://a.example/2x.png 2x">`,
+	}
+	for _, in := range mustOffer {
+		if !ReferencesRemoteContent(in) {
+			t.Errorf("images would be hidden with no offer for: %s\n sanitized: %s", in, HTML(in))
+		}
+		if !strings.Contains(HTML(in), `data-blocked-src="https://a.`) {
+			t.Errorf("sanitizer did not withhold the image for: %s\n sanitized: %s", in, HTML(in))
 		}
 	}
 }

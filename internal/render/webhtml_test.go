@@ -38,6 +38,12 @@ func TestWebHTMLInlinesImages(t *testing.T) {
 	if !strings.Contains(out, "alt=\"missing\"") {
 		t.Errorf("alt text lost:\n%s", out)
 	}
+	// An alt-less unresolved image gains a visible placeholder instead of
+	// rendering as an empty box.
+	withAlt := WebHTML(`<img src="https://gone.example/x.png">`, nil)
+	if !strings.Contains(withAlt, `alt="[image]"`) || strings.Contains(withAlt, "gone.example") {
+		t.Errorf("placeholder not injected:\n%s", withAlt)
+	}
 	if strings.Contains(out, "unresolved.example") {
 		t.Errorf("unresolved URL survived in output:\n%s", out)
 	}

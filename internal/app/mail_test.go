@@ -502,3 +502,53 @@ func TestOpenMessageBuildsWebHTML(t *testing.T) {
 	srv.setRaw(model.Ref{Mailbox: "INBOX", UIDValidity: 1, UID: 1}, plainMessage)
 	_ = plainMessage
 }
+
+// TestOpenMessageOffersLazyRemoteImages locks the reported user symptom:
+// mail whose images load through lazy-load attributes (data-src,
+// data-original, srcset) must both withhold them AND show the "Load remote
+// content" offer — never hide images silently.
+func TestOpenMessageOffersLazyRemoteImages(t *testing.T) {
+	lazyMessage := "From: Alice <alice@example.org>\r\n" +
+		"To: user@example.org\r\n" +
+		"Subject: Newsletter\r\n" +
+		"MIME-Version: 1.0\r\n" +
+		"Content-Type: text/html; charset=utf-8\r\n" +
+		"\r\n" +
+		`<p>Weekly news</p>` +
+		`<img src="" data-src="https://tracker.example/lazy.png">` +
+		`<img srcset="https://tracker.example/1x.png 1x, https://tracker.example/2x.png 2x">` +
+		"<img src=\"data:image/gif;base64,R0lGOD\" data-original=\"https://tracker.example/p.png\">\r\n"
+
+	srv := newFakeServer()
+	srv.addBox("INBOX")
+	srv.seed("INBOX", 1)
+	ref := model.Ref{Mailbox: "INBOX", UIDValidity: 1, UID: 1}
+	srv.setRaw(ref, lazyMessage)
+
+	cfg := testConfig(t, testAccount("alice"))
+	c, ev, _ := newTestController(t, cfg, srv)
+	startApp(t, c, ev, "alice")
+	ev.wait(t, "rows", func() bool { return len(ev.messageRows("alice", "INBOX")) > 0 })
+
+	c.OpenMessage("alice", ref)
+	ev.wait(t, "view", func() bool { _, ok := ev.openedView(ref); return ok })
+	view, _ := ev.openedView(ref)
+
+	if !view.ShowRemoteContentBar {
+		t.Fatal("no remote-content bar: images would be hidden with no way to show them")
+	}
+	if view.HTMLBody == "" {
+		t.Fatal("HTMLBody missing")
+	}
+	// Withheld images must appear as visible placeholders (not vanish) and
+	// carry no live URL before the user opts in.
+	if got := strings.Count(view.HTMLBody, "<img"); got != 3 {
+		t.Errorf("placeholders: %d <img> elements, want 3:\n%.400s", got, view.HTMLBody)
+	}
+	if !strings.Contains(view.HTMLBody, "alt=") {
+		t.Errorf("withheld images left no visible placeholder:\n%.400s", view.HTMLBody)
+	}
+	if strings.Contains(view.HTMLBody, "src=\"https://") {
+		t.Errorf("remote src leaked before opt-in:\n%.300s", view.HTMLBody)
+	}
+}

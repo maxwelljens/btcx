@@ -59,9 +59,14 @@ func WebHTML(untrusted string, images map[string]string) string {
 				return
 			}
 		}
-		// Unresolvable or unexpected reference: show alt text only.
+		// Unresolvable or unexpected reference: show alt text only. Ensure
+		// an alt exists so the web view renders a visible placeholder
+		// instead of an empty box.
 		removeAttr(n, "src")
 		removeAttr(n, "data-blocked-src")
+		if htmlAttr(n, "alt") == "" {
+			setAttr(n, "alt", "[image]")
+		}
 	})
 
 	var body bytes.Buffer

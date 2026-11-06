@@ -32,7 +32,16 @@ func newPolicy() *bluemonday.Policy {
 	// and AllowElements alone does not populate it.
 	p.AllowAttrs().AllowNoAttrs().OnElements(allowedElements...)
 	p.AllowAttrs("href").OnElements("a")
-	p.AllowAttrs("src", "alt", "width", "height").OnElements("img")
+	// Raw image-source attributes must survive this first stage so
+	// cleanNode can resolve them (srcset, lazy-load data-src and friends)
+	// and withhold the result behind data-blocked-src. bluemonday alone
+	// would drop them, hiding images with no way to ever offer them back.
+	// cleanNode's filterAttrs strips them all again in every branch, so
+	// none of them ever reach the output.
+	p.AllowAttrs("src", "alt", "width", "height",
+		"srcset", "data-srcset",
+		"data-src", "data-original", "data-lazy-src", "data-lazy",
+		"data-cfsrc", "data-actualsrc").OnElements("img")
 	p.AllowAttrs("align", "colspan", "rowspan").OnElements("td", "th")
 	// cid: is needed for inline images; it is stripped from a[href] below.
 	p.AllowURLSchemes("http", "https", "mailto", "cid")
@@ -86,18 +95,24 @@ func cleanNode(n *html.Node) {
 			}
 			filterAttrs(n, "href", "rel")
 		case "img":
-			src := attr(n, "src")
 			// Never trust a data-blocked-src supplied by the message.
 			removeAttr(n, "data-blocked-src")
+			// Resolve what the image really points at: a usable src wins,
+			// then common lazy-load attributes, then the first srcset
+			// candidate. Anything remote is withheld behind data-blocked-src
+			// so the UI can offer to load it; filterAttrs drops the lazy
+			// attributes along the way.
+			src := imageSource(n)
 			switch scheme(src) {
 			case "cid":
+				setAttr(n, "src", src)
 				filterAttrs(n, "src", "alt", "width", "height")
 			case "http", "https":
 				// Keep the element so the UI can show a placeholder and
 				// optionally load the image later.
-				setAttr(n, "data-blocked-src", src)
+				setAttr(n, "data-blocked-src", stripControls(src))
 				setAttr(n, "src", "")
-				filterAttrs(n, "src", "alt", "width", "height", "data-blocked-src")
+				filterAttrs(n, "src", "alt", "width", "height", blockedSrcAttr)
 			default:
 				removeAttr(n, "src")
 				filterAttrs(n, "src", "alt", "width", "height")
@@ -111,6 +126,50 @@ func cleanNode(n *html.Node) {
 	for c := n.FirstChild; c != nil; c = c.NextSibling {
 		cleanNode(c)
 	}
+}
+
+// imageSource resolves the URL an <img> really points at: a usable src
+// wins, then common lazy-load attributes, then the first candidate of
+// srcset/data-srcset. It returns the raw attribute value (possibly junk,
+// which the caller's scheme switch rejects).
+func imageSource(n *html.Node) string {
+	src := attr(n, "src")
+	if usableImageURL(src) {
+		return src
+	}
+	for _, k := range []string{"data-src", "data-original", "data-lazy-src", "data-lazy", "data-cfsrc", "data-actualsrc"} {
+		if v := attr(n, k); usableImageURL(v) {
+			return v
+		}
+	}
+	for _, k := range []string{"srcset", "data-srcset"} {
+		if u := firstSetCandidate(attr(n, k)); usableImageURL(u) {
+			return u
+		}
+	}
+	return src
+}
+
+// usableImageURL reports whether v names an image btcx can render or
+// withhold (inline cid: reference or http(s)).
+func usableImageURL(v string) bool {
+	switch scheme(v) {
+	case "cid", "http", "https":
+		return true
+	}
+	return false
+}
+
+// firstSetCandidate returns the first candidate URL of a srcset value.
+func firstSetCandidate(v string) string {
+	if i := strings.IndexByte(v, ','); i >= 0 {
+		v = v[:i]
+	}
+	f := strings.Fields(v)
+	if len(f) == 0 {
+		return ""
+	}
+	return f[0]
 }
 
 // PlainText converts untrusted HTML to readable plain text.
@@ -216,70 +275,39 @@ func tidyPlain(s string) string {
 	return strings.TrimSpace(s)
 }
 
-// ReferencesRemoteContent reports whether the original HTML references any
-// http(s) resource: resource attributes (src, background, poster, data), link
-// hrefs, and URLs inside style attributes or style elements. Used to decide
-// whether the UI offers to load remote content.
+// ReferencesRemoteContent reports whether rendering this HTML withholds at
+// least one remote image — i.e. the UI must offer "Load remote content".
+//
+// The answer is defined on the sanitizer's own output (data-blocked-src),
+// so the offer can never diverge from what is actually hidden: images btcx
+// removes outright (styles, link elements, attributes it strips) are not
+// mentioned, because nothing could reload them and a button would lie.
 func ReferencesRemoteContent(untrusted string) bool {
-	z := html.NewTokenizer(strings.NewReader(untrusted))
-	inStyle := false
+	z := html.NewTokenizer(strings.NewReader(HTML(untrusted)))
 	for {
 		switch z.Next() {
 		case html.ErrorToken:
 			return false
-		case html.StartTagToken:
-			t := z.Token()
-			if t.Data == "style" {
-				inStyle = true
-			}
-			if tokenReferencesRemote(t) {
-				return true
-			}
-		case html.SelfClosingTagToken:
-			if tokenReferencesRemote(z.Token()) {
-				return true
-			}
-		case html.EndTagToken:
-			if z.Token().Data == "style" {
-				inStyle = false
-			}
-		case html.TextToken:
-			if inStyle && containsRemoteURL(string(z.Text())) {
-				return true
+		case html.StartTagToken, html.SelfClosingTagToken:
+			for _, a := range z.Token().Attr {
+				if strings.EqualFold(a.Key, blockedSrcAttr) {
+					return true
+				}
 			}
 		}
 	}
 }
 
-func tokenReferencesRemote(t html.Token) bool {
-	for _, a := range t.Attr {
-		switch strings.ToLower(a.Key) {
-		case "src", "background", "poster", "data", "href":
-			if isRemoteURL(a.Val) {
-				return true
-			}
-		case "style":
-			if containsRemoteURL(a.Val) {
-				return true
-			}
-		}
-	}
-	return false
-}
+// blockedSrcAttr is the attribute the sanitizer sets on withheld remote
+// images. It is both the withholding marker and the UI's load key.
+const blockedSrcAttr = "data-blocked-src"
 
-func isRemoteURL(v string) bool {
-	s := stripSpace(strings.ToLower(v))
-	return strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://") || strings.HasPrefix(s, "//")
-}
-
-func containsRemoteURL(v string) bool {
-	s := stripSpace(strings.ToLower(v))
-	return strings.Contains(s, "http://") || strings.Contains(s, "https://") || strings.Contains(s, "url(//")
-}
-
-func stripSpace(s string) string {
+// stripControls removes ASCII control characters (tabs, CR, LF and other
+// bytes < 0x20), mirroring URL parsing: browsers strip them before scheme
+// resolution, so "ht\ttp:" is http — smuggled schemes must not slip past.
+func stripControls(s string) string {
 	return strings.Map(func(r rune) rune {
-		if r <= ' ' {
+		if r < 0x20 {
 			return -1
 		}
 		return r
@@ -290,7 +318,8 @@ func stripSpace(s string) string {
 // control characters and whitespace are ignored so smuggled schemes such as
 // "java\tscript:" are classified consistently.
 func scheme(raw string) string {
-	s := strings.ToLower(strings.TrimFunc(raw, func(r rune) bool { return r <= ' ' }))
+	s := strings.ToLower(stripControls(raw))
+	s = strings.TrimFunc(s, func(r rune) bool { return r == ' ' })
 	i := strings.IndexByte(s, ':')
 	if i <= 0 {
 		return ""

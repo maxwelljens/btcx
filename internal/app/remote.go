@@ -232,6 +232,17 @@ func (c *Controller) fetchImage(ctx context.Context, rawURL string) contract.Inl
 
 // blockedImageURLs extracts the remote image URLs the sanitizer recorded, in
 // document order and without duplicates.
+
+// hasAttrNode reports whether n carries key (case-insensitively).
+func hasAttrNode(n *xhtml.Node, key string) bool {
+	for _, a := range n.Attr {
+		if strings.EqualFold(a.Key, key) {
+			return true
+		}
+	}
+	return false
+}
+
 func blockedImageURLs(htmlBody string) []string {
 	if strings.TrimSpace(htmlBody) == "" {
 		return nil
@@ -246,7 +257,8 @@ func blockedImageURLs(htmlBody string) []string {
 	)
 	var walk func(*xhtml.Node)
 	walk = func(n *xhtml.Node) {
-		if n.Type == xhtml.ElementNode && n.Data == "img" {
+		// Any element the sanitizer withheld an image on (today: img).
+		if n.Type == xhtml.ElementNode && hasAttrNode(n, "data-blocked-src") {
 			for _, a := range n.Attr {
 				if a.Key == "data-blocked-src" && a.Val != "" && !seen[a.Val] {
 					seen[a.Val] = true
