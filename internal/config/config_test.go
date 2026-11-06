@@ -589,3 +589,27 @@ func TestResolvePasswordTimeoutIsDeadline(t *testing.T) {
 		t.Fatalf("error = %v, want context.DeadlineExceeded", err)
 	}
 }
+
+func TestServerResolvePassword(t *testing.T) {
+	ctx := context.Background()
+
+	// Static password.
+	s := Server{Password: "secret"}
+	pw, err := s.ResolvePassword(ctx, "acct")
+	if err != nil || pw != "secret" {
+		t.Errorf("static: got %q, %v", pw, err)
+	}
+
+	// Password command runs without a shell and trims output.
+	s = Server{PasswordCommand: []string{"/bin/echo", "fromcmd"}}
+	pw, err = s.ResolvePassword(ctx, "acct")
+	if err != nil || pw != "fromcmd" {
+		t.Errorf("command: got %q, %v", pw, err)
+	}
+
+	// Nothing configured: error without secrets.
+	s = Server{}
+	if _, err := s.ResolvePassword(ctx, "acct"); err == nil {
+		t.Error("expected error when no password is configured")
+	}
+}

@@ -46,6 +46,8 @@ internal/
   script/                Lua sandbox (go-lua): hooks and safe API
   editor/                external editor integration (nvim, vim, $EDITOR),
                          secure temp files, built-in editor buffer logic
+  contract/              app<->ui boundary: view models + Controller/Events
+                         interfaces (compiles independently of both sides)
   ui/                    gotk4 widgets and views (thin; no business logic)
   app/                   presenters/controllers wiring model + services + ui
   buildinfo/             version/commit build metadata (ldflags)

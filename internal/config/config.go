@@ -227,11 +227,19 @@ func (a Account) ResolvePassword(ctx context.Context) (string, error) {
 	if s.Password == "" && len(s.PasswordCommand) == 0 {
 		s = a.SMTP
 	}
+	return s.ResolvePassword(ctx, a.Name)
+}
+
+// ResolvePassword resolves this server's credential: the output of
+// PasswordCommand when one is configured, otherwise the static Password.
+// Use this when IMAP and SMTP have distinct credentials. Error messages
+// never contain the password or the command's output.
+func (s Server) ResolvePassword(ctx context.Context, account string) (string, error) {
 	if len(s.PasswordCommand) > 0 {
-		return runPasswordCommand(ctx, a.Name, s.PasswordCommand)
+		return runPasswordCommand(ctx, account, s.PasswordCommand)
 	}
 	if s.Password == "" {
-		return "", fmt.Errorf("config: account %s: no password or password_command configured", a.Name)
+		return "", fmt.Errorf("config: account %s: no password or password_command configured", account)
 	}
 	return s.Password, nil
 }
