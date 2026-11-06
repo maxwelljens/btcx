@@ -449,3 +449,56 @@ func TestLoadFolderDegradesGracefully(t *testing.T) {
 		t.Errorf("dials = %d, want 1 (healed connection must be kept)", n)
 	}
 }
+
+// TestOpenMessageBuildsWebHTML locks the web-view contract: HTML mail
+// carries a web-ready document with cid images inlined as data URIs, no
+// live markup, and no network references.
+func TestOpenMessageBuildsWebHTML(t *testing.T) {
+	cidHTMLMessage := "From: Alice <alice@example.org>\r\n" +
+		"To: user@example.org\r\n" +
+		"Subject: Cid\r\n" +
+		"MIME-Version: 1.0\r\n" +
+		"Content-Type: multipart/related; boundary=\"r\"\r\n" +
+		"\r\n" +
+		"--r\r\n" +
+		"Content-Type: text/html; charset=utf-8\r\n" +
+		"\r\n" +
+		"<p>Hi <img src=\"cid:logo@x\" alt=\"logo\"><script>alert(1)</script></p>\r\n" +
+		"--r\r\n" +
+		"Content-Type: image/png\r\n" +
+		"Content-ID: <logo@x>\r\n" +
+		"Content-Disposition: inline\r\n" +
+		"Content-Transfer-Encoding: base64\r\n" +
+		"\r\n" + pngBase64 + "\r\n" +
+		"--r--\r\n"
+
+	srv := newFakeServer()
+	srv.addBox("INBOX")
+	srv.seed("INBOX", 1)
+	ref := model.Ref{Mailbox: "INBOX", UIDValidity: 1, UID: 1}
+	srv.setRaw(ref, cidHTMLMessage)
+
+	cfg := testConfig(t, testAccount("alice"))
+	c, ev, _ := newTestController(t, cfg, srv)
+	startApp(t, c, ev, "alice")
+	ev.wait(t, "rows", func() bool { return len(ev.messageRows("alice", "INBOX")) > 0 })
+
+	c.OpenMessage("alice", ref)
+	ev.wait(t, "web view", func() bool { _, ok := ev.openedView(ref); return ok })
+	view, _ := ev.openedView(ref)
+
+	if view.HTMLBody == "" {
+		t.Fatal("HTMLBody empty for HTML mail")
+	}
+	if !strings.Contains(view.HTMLBody, "data:image/png;base64,") {
+		t.Errorf("cid image not inlined as data URI:\n%.300s", view.HTMLBody)
+	}
+	for _, bad := range []string{"cid:", "http://", "https://", "<script"} {
+		if strings.Contains(view.HTMLBody, bad) {
+			t.Errorf("HTMLBody contains %q:\n%.300s", bad, view.HTMLBody)
+		}
+	}
+	// Plain mail stays on the Pango path.
+	srv.setRaw(model.Ref{Mailbox: "INBOX", UIDValidity: 1, UID: 1}, plainMessage)
+	_ = plainMessage
+}

@@ -15,6 +15,7 @@ import (
 
 	"btcx/internal/contract"
 	"btcx/internal/model"
+	"btcx/internal/render"
 	"btcx/internal/sanitize"
 )
 
@@ -152,6 +153,9 @@ func (c *Controller) LoadRemoteContent(account string, ref model.Ref) {
 		view := c.view(ctx, st, ref, msg)
 		view.ShowRemoteContentBar = false
 		view.RemoteImages = c.remoteImages(ctx, msg)
+		if strings.TrimSpace(msg.HTML) != "" {
+			view.HTMLBody = render.WebHTML(msg.HTML, imageURIs(msg, view.RemoteImages))
+		}
 		c.events.OnMessageOpened(view)
 	})
 }

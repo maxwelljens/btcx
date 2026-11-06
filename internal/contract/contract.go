@@ -75,6 +75,11 @@ type MessageView struct {
 	Date      time.Time
 	PangoBody string // ready-to-display Pango markup (sanitized + rendered)
 
+	// HTMLBody is web-ready HTML for the embedded WebKit view: sanitized
+	// with images inlined as data URIs so the view never performs network
+	// requests ("" for plain-text messages; the UI falls back to PangoBody).
+	HTMLBody string
+
 	// ShowRemoteContentBar is true when the body references remote content
 	// that is blocked. After LoadRemoteContent the bar hides and
 	// RemoteImages carries the fetched bytes.

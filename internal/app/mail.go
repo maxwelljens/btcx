@@ -408,7 +408,29 @@ func (c *Controller) view(ctx context.Context, st *accountState, ref model.Ref, 
 	if remote && !c.cfg.BlockRemoteContent {
 		view.RemoteImages = c.remoteImages(ctx, msg)
 	}
+	if strings.TrimSpace(msg.HTML) != "" {
+		view.HTMLBody = render.WebHTML(msg.HTML, imageURIs(msg, view.RemoteImages))
+	}
 	return view
+}
+
+// imageURIs maps cid: references and fetched remote images to inline data
+// URIs for the web view, keyed by "cid:<id>" and the absolute URL.
+func imageURIs(msg *model.Message, images []contract.InlineImage) map[string]string {
+	out := make(map[string]string, len(msg.Attachments)+len(images))
+	for _, a := range msg.Attachments {
+		if a.ContentID == "" {
+			continue
+		}
+		out["cid:"+a.ContentID] = render.DataURI(a.ContentType, a.Data)
+	}
+	for _, img := range images {
+		if img.Failed || img.URL == "" || len(img.Data) == 0 {
+			continue
+		}
+		out[img.URL] = render.DataURI(img.ContentType, img.Data)
+	}
+	return out
 }
 
 // attachmentInfos describes msg's attachments with sanitized names.
