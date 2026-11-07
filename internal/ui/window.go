@@ -292,7 +292,7 @@ func (w *MainWindow) buildWelcome() gtk.Widgetter {
 	heading.SetHAlign(gtk.AlignCenter)
 	box.Append(heading)
 
-	intro := gtk.NewLabel("A lean mail client: read, compose and search your mail — nothing else. Set up an account to get started.")
+	intro := gtk.NewLabel("Read, compose, and search your mail. Set up an account to get started.")
 	intro.SetWrap(true)
 	intro.SetJustify(gtk.JustifyCenter)
 	intro.SetHAlign(gtk.AlignCenter)

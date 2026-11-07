@@ -35,7 +35,7 @@ func TestTLSComboRoundTrip(t *testing.T) {
 
 func TestGeneratedFilesText(t *testing.T) {
 	got := generatedFilesText([]string{"config.toml", "accounts/example.toml.example"})
-	want := "First launch — btcx created example configuration for you:\n" +
+	want := "First launch: btcx created example configuration for you:\n" +
 		"• config.toml\n• accounts/example.toml.example"
 	if got != want {
 		t.Errorf("generatedFilesText = %q, want %q", got, want)

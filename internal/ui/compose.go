@@ -335,7 +335,7 @@ func (c *ComposeWindow) externalEdit() {
 }
 
 func (c *ComposeWindow) confirmDiscard() {
-	alertWindow(&c.Window, "Discard message?", "Its content will be lost.",
+	alertWindow(&c.Window, "Discard this message?", "The draft will be lost.",
 		"Keep editing", "Discard", c.forceClose)
 }
 

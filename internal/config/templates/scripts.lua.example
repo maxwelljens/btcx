@@ -1,5 +1,5 @@
 -- ───────────────────────────────────────────────────────────────────────────
--- btcx example Lua script — copy it to a .lua file to run it
+-- btcx example Lua script. Copy it to a .lua file to run it
 --
 -- btcx runs every *.lua file in its script directory (~/.config/btcx/scripts
 -- by default, or script_dir in config.toml) in file-name order. This file
@@ -11,8 +11,8 @@
 -- delete what you do not need.
 --
 -- The sandbox: scripts cannot run programs, open files, load modules, or
--- touch the network. Only string, table, math and safe base functions exist
--- — no os, io, require, load or debug. Each hook call has an instruction
+-- touch the network. Only string, table, math and safe base functions exist:
+-- no os, io, require, load or debug. Each hook call has an instruction
 -- budget (about 2 seconds of work); a script that exceeds it is disabled for
 -- the session with a visible warning. A broken script can never crash btcx
 -- or block mail. Errors are reported as warnings.
@@ -21,14 +21,14 @@
 -- ───────────────────────────────────────────────────────────────────────────
 
 
--- on_startup() — runs once when btcx starts.
+-- on_startup(): runs once when btcx starts.
 --
 -- function on_startup()
 --   btcx.log("info", "hello from btcx " .. btcx.version())
 -- end
 
 
--- on_new_mail(envelope) — runs once for each message that arrives while btcx
+-- on_new_mail(envelope): runs once for each message that arrives while btcx
 -- is running (new mail seen by the IMAP watcher, not retroactively for old
 -- mail).
 --
@@ -60,7 +60,7 @@ function on_new_mail(envelope)
 end
 
 
--- before_send(message) — runs before btcx sends a message. Return false to
+-- before_send(message): runs before btcx sends a message. Return false to
 -- cancel the send; both the veto and the reason are shown to you.
 --
 -- message fields: subject, plain, html (strings), from, to, cc (address
@@ -76,7 +76,7 @@ end
 -- end
 
 
--- after_send(message, sent, err_msg) — runs after a send attempt.
+-- after_send(message, sent, err_msg): runs after a send attempt.
 -- sent is true on success; err_msg explains a failure and is empty on
 -- success.
 --

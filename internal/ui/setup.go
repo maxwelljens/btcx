@@ -117,7 +117,7 @@ func (s *SetupWindow) buildBody() gtk.Widgetter {
 
 	detect := gtk.NewButtonWithLabel("Detect settings")
 	detect.SetHAlign(gtk.AlignStart)
-	detect.SetTooltipText("btcx guesses imap./smtp.<your domain>; many providers differ — check their IMAP/SMTP help page")
+	detect.SetTooltipText("btcx guesses imap./smtp.<your domain>. Many providers differ, so check their IMAP/SMTP help page.")
 	detect.ConnectClicked(s.detect)
 	box.Append(detect)
 
@@ -182,7 +182,7 @@ func (s *SetupWindow) buildBody() gtk.Widgetter {
 	s.passCommand.SetPlaceholderText("pass show mail/example.org")
 	cmdPage := gtk.NewBox(gtk.OrientationVertical, 4)
 	cmdPage.Append(s.passCommand)
-	cmdPage.Append(hintLabel("Run without a shell each time btcx connects — works with pass, gopass, secret-tool…"))
+	cmdPage.Append(hintLabel("Runs without a shell each time btcx connects; works with pass, gopass, secret-tool…"))
 	s.passStack.AddNamed(passPage, "password")
 	s.passStack.AddNamed(cmdPage, "command")
 	switcher := gtk.NewStackSwitcher()
@@ -557,7 +557,7 @@ func guessServers(email string) (contract.ServerSpec, contract.ServerSpec) {
 
 // generatedFilesText is the first-run banner: what btcx created this launch.
 func generatedFilesText(files []string) string {
-	const lead = "First launch — btcx created example configuration for you"
+	const lead = "First launch: btcx created example configuration for you"
 	if len(files) == 0 {
 		return lead + "."
 	}

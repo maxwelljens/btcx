@@ -1,5 +1,5 @@
 # ───────────────────────────────────────────────────────────────────────────
-# btcx account example — copy this file for every account you add.
+# btcx account example. Copy this file for every account you add.
 #
 # btcx keeps one file per e-mail account in
 #
@@ -25,15 +25,15 @@
 # ---------------------------
 # Your mail lives on two servers, and btcx needs both:
 #
-#   IMAP — incoming. The server that stores your mailboxes and messages.
+#   IMAP: incoming. The server that stores your mailboxes and messages.
 #          btcx reads it to show your mail, and writes flags (read, flagged,
 #          deleted) back to it.
-#   SMTP — outgoing. The server that accepts a message you just wrote and
+#   SMTP: outgoing. The server that accepts a message you just wrote and
 #          delivers it to the recipient.
 #
 # They often share a host name and a password, but they are separate
 # settings. If you can read mail but not send it, the [smtp] section is
-# wrong — and the other way round for [imap].
+# wrong, and the other way round for [imap].
 # ───────────────────────────────────────────────────────────────────────────
 
 
@@ -54,7 +54,7 @@
 # real_name = "Maxwell"
 
 
-# Incoming mail — IMAP
+# Incoming mail: IMAP
 # ====================
 # Find the settings on your provider's support pages: search for
 # "IMAP settings". You need the IMAP server name, the port, and usually
@@ -75,7 +75,7 @@
 # username = "max@example.org"
 
 
-# Passwords — choose ONE of the two options below
+# Passwords: choose ONE of the two options below
 # ===============================================
 # Option A, a password in this file:
 # password = "my-secret-password"
@@ -103,10 +103,10 @@
 #
 # Set exactly one of password and password_command per server. Setting both
 # is an error; setting neither is allowed (btcx just cannot log in until you
-# add one). Many providers require an app-specific password — see below.
+# add one). Many providers require an app-specific password, see below.
 
 
-# Encryption — TLS
+# Encryption: TLS
 # ================
 # tls = "tls"
 #
@@ -133,7 +133,7 @@
 # insecure_skip_verify = true
 
 
-# Outgoing mail — SMTP
+# Outgoing mail: SMTP
 # ====================
 # Search your provider's support pages for "SMTP settings". The host is
 # often "smtp." plus your domain. Submission usually needs authentication,
@@ -154,7 +154,7 @@
 # insecure_skip_verify = true
 
 
-# Common providers — copy the values that match your account
+# Common providers: copy the values that match your account
 # ==========================================================
 # These are the providers' published settings. The passwords are yours to
 # fill in; most of these providers refuse your normal account password from
@@ -176,7 +176,7 @@
 #   Outlook.com needs an app password when 2-Step Verification is on.
 #   Microsoft 365 often has password (basic) authentication disabled; your
 #   administrator may need to enable SMTP AUTH for the mailbox. Newer
-#   tenants may require OAuth, which btcx does not support yet — then use a
+#   tenants may require OAuth, which btcx does not support yet; then use a
 #   different account or the provider's app password, if offered.
 #
 # Fastmail
@@ -206,7 +206,7 @@
 # Servers keep sent, draft and deleted mail in folders with names of their
 # own choosing ("Sent", "Sent Items", "Sent Mail", "[Gmail]/Sent Mail",
 # "INBOX.Drafts", ...). Tell btcx the exact, case-sensitive names your
-# server uses — look at them in the provider's webmail. The defaults are
+# server uses; look at them in the provider's webmail. The defaults are
 # shown. You only need to change what is different.
 # [sent]
 # mailbox = "Sent"
@@ -230,7 +230,7 @@
 # """
 
 
-# QUICK START — uncomment this block and fill in three values
+# QUICK START: uncomment this block and fill in three values
 # ===========================================================
 # Copy it into accounts/personal.toml, replace the four placeholders
 # (display_name, email, both hosts and the password) and that is a working

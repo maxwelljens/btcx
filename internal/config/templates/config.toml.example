@@ -9,7 +9,7 @@
 # To change something, delete the leading "# " from its line and edit it.
 #
 # Accounts are NOT configured here. Each account has its own file in
-# ~/.config/btcx/accounts/ — see accounts/example.toml.example in that
+# ~/.config/btcx/accounts/; see accounts/example.toml.example in that
 # directory for a walkthrough.
 # ───────────────────────────────────────────────────────────────────────────
 
@@ -53,11 +53,11 @@
 # watch = true
 
 
-# Remote content in HTML mail — privacy
+# Remote content in HTML mail: privacy
 # =====================================
 # Most HTML newsletters embed images loaded from the sender's web server.
 # Each load tells the sender that you opened the message, when, and from
-# which IP address — a tracking pixel by another name.
+# which IP address; a tracking pixel by another name.
 #
 # true: block them. btcx shows placeholders and you can reveal the images
 #       for one message when you trust it.

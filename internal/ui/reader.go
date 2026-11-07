@@ -188,14 +188,14 @@ func (r *readerPane) remoteBar(view contract.MessageView) gtk.Widgetter {
 	lock := gtk.NewImageFromIconName("channel-secure-symbolic")
 	bar.Append(lock)
 
-	text := gtk.NewLabel("Remote content blocked (privacy)")
+	text := gtk.NewLabel("Remote images blocked for privacy")
 	text.SetXAlign(0)
 	text.SetHExpand(true)
 	bar.Append(text)
 
 	if domain := senderDomain(view.From); domain != "" {
 		trust := gtk.NewButtonWithLabel("Always from " + domain)
-		trust.SetTooltipText("Remember this domain: always load remote images in messages from it")
+		trust.SetTooltipText("Always load remote images from this sender's domain")
 		trust.ConnectClicked(func() {
 			if err := r.win.controller.TrustImageDomain(domain); err != nil {
 				r.win.app.showDialog("Cannot remember domain", err.Error())
