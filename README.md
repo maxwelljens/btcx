@@ -5,6 +5,8 @@ calendar, no contacts, no feed reader. HTML mail opens in a hardened
 WebKitGTK view with JavaScript disabled and no network requests of its own;
 links open in your browser.
 
+![Reading a newsletter while a reply is open](docs/preview.png)
+
 ## Highlights
 
 - First run with no configuration: btcx writes commented example config

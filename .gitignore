@@ -21,3 +21,8 @@ coverage.out
 # Local config never belongs in the repo
 config.toml
 accounts/
+
+# Preview screenshot intermediates (scripts/preview.sh)
+docs/preview.png.work/
+docs/preview.png.xids
+docs/preview.png.raw.png

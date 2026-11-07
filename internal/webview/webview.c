@@ -169,7 +169,13 @@ btcx_webview_focus(WebKitWebView *view)
 gboolean
 btcx_webview_widget_has_focus(uintptr_t view)
 {
-    return gtk_widget_has_focus(GTK_WIDGET((GtkWidget *)(uintptr_t)view));
+    GtkWidget *widget = GTK_WIDGET((GtkWidget *)(uintptr_t)view);
+    GtkRoot *root = gtk_widget_get_root(widget);
+    if (root == NULL || !GTK_IS_WINDOW(root))
+        return gtk_widget_has_focus(widget);
+    /* The window manager decides which toplevel has the desktop focus;
+       what Focus() must achieve is becoming the window's focus widget. */
+    return gtk_window_get_focus(GTK_WINDOW(root)) == widget;
 }
 
 gboolean
