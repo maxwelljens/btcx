@@ -29,11 +29,10 @@ import (
 // on Wayland desktops): that is where `ffmpeg -f x11grab` reads the
 // windows.
 const (
-	previewChildEnv  = "BTCX_PREVIEW_CHILD"
-	previewOutEnv    = "BTCX_PREVIEW_OUT"
-	previewXIDsEnv   = "BTCX_PREVIEW_XIDS"
-	previewQuitMs    = 9_000 // child lifetime; the parent captures well before it
-	previewCanvasHex = "#1e2025"
+	previewChildEnv = "BTCX_PREVIEW_CHILD"
+	previewOutEnv   = "BTCX_PREVIEW_OUT"
+	previewXIDsEnv  = "BTCX_PREVIEW_XIDS"
+	previewQuitMs   = 9_000 // child lifetime; the parent captures well before it
 )
 
 // TestPreviewScreenshot spawns the child (which shows the scene), then
@@ -199,22 +198,28 @@ func layerPreview(work, out string) error {
 		return nil
 	}
 	shadow := func(src, dst, spec string) error {
-		return run(src,
+		return run(src, "-alpha", "set",
 			"(", "+clone", "-background", "black", "-shadow", spec, ")",
 			"-background", "none", "-layers", "merge", "+repage", dst)
 	}
 
+	// Tight drop shadows: a small blur close to the window edge reads as
+	// a shadow; a wide one turns into a grey fog across light mail bodies
+	// (and looks inverted there). The source windows are opaque, so give
+	// the shadow an explicit alpha to blur before layering it underneath.
 	mainS := filepath.Join(work, "main_s.png")
-	if err := shadow(mainPath, mainS, "55x10+0+10"); err != nil {
+	if err := shadow(mainPath, mainS, "30x7+0+9"); err != nil {
 		return err
 	}
 	composeS := filepath.Join(work, "compose_s.png")
-	if err := shadow(composePath, composeS, "60x12+0+12"); err != nil {
+	if err := shadow(composePath, composeS, "35x9+0+11"); err != nil {
 		return err
 	}
+	// Transparent canvas: the preview must sit on any page background,
+	// so nothing is drawn behind the windows but the drop shadows.
 	canvas := filepath.Join(work, "canvas.png")
 	if err := run("-size", fmt.Sprintf("%dx%d", canvasW, canvasH),
-		"xc:"+previewCanvasHex, canvas); err != nil {
+		"xc:none", canvas); err != nil {
 		return err
 	}
 	return run(canvas, mainS,
