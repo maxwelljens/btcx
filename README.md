@@ -55,6 +55,18 @@ go build -ldflags "-X btcx/internal/buildinfo.version=v0.1.0 \
   -o btcx ./cmd/btcx
 ```
 
+## Installing
+
+```sh
+go build -o btcx ./cmd/btcx
+install -Dm755 btcx ~/.local/bin/btcx
+install -Dm644 btcx.desktop ~/.local/share/applications/btcx.desktop
+install -Dm644 icons/btcx.svg ~/.local/share/icons/hicolor/scalable/apps/btcx.svg
+```
+
+`~/.local/bin` has to be on your `PATH` for the desktop entry's
+`Exec=btcx` to resolve.
+
 ## First run
 
 Launch `btcx` with no configuration and it:

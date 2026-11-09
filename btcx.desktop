@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=btcx
+GenericName=Mail Client
+Comment=Read and write e-mail
+Exec=btcx
+Icon=btcx
+Terminal=false
+StartupNotify=true
+StartupWMClass=org.btcx.Mail
+Categories=Network;Email;
+Keywords=email;mail;imap;smtp;
